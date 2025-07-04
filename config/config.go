@@ -2,6 +2,7 @@ package config
 
 import (
 	_ "embed"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -61,10 +62,26 @@ func GetDBFolderPath() string {
 	return dbFolderPath
 }
 
+func GetDBPath() string {
+	return fmt.Sprintf("%s/%s.db", GetDBFolderPath(), GetName())
+}
+
 func GetLogFolder() string {
 	logFolderPath := os.Getenv("XUI_LOG_FOLDER")
 	if logFolderPath == "" {
 		logFolderPath = "/var/log"
 	}
 	return logFolderPath
+}
+
+func GetDBType() string {
+	dbType := os.Getenv("XUI_DB_TYPE")
+	if dbType == "" {
+		return "sqlite"
+	}
+	return dbType
+}
+
+func GetDBDSN() string {
+	return os.Getenv("XUI_DB_DSN")
 }
