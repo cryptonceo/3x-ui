@@ -42,7 +42,7 @@ func runWebServer() {
 
 	godotenv.Load()
 
-	dsn := "root:frif2003@tcp(172.20.241.138:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
 	err := database.InitDB(dsn)
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
