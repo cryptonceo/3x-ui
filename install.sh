@@ -171,6 +171,36 @@ install_x-ui() {
         rm -rf /usr/local/x-ui/
     fi
 
+    if ! command -v mysql >/dev/null 2>&1; then
+        echo "MySQL/MariaDB не установлен. Устанавливаем..."
+        case "${release}" in
+        ubuntu | debian | armbian)
+            apt-get update && apt-get install -y mariadb-server
+            systemctl start mariadb
+            systemctl enable mariadb
+            ;;
+        centos | rhel | almalinux | rocky | ol)
+            yum -y install mariadb-server
+            systemctl start mariadb
+            systemctl enable mariadb
+            ;;
+        *)
+            echo "Неподдерживаемая ОС для автоматической установки MySQL."
+            exit 1
+            ;;
+        esac
+    fi
+
+    # Создание базы данных и пользователя
+    echo "Создание базы данных MySQL 'xui_db'..."
+    mysql -u root -pfrif2003 -e "CREATE DATABASE IF NOT EXISTS xui_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" || {
+        echo "Ошибка создания базы данных. Проверьте доступ к MySQL."
+        exit 1
+    }
+    mysql -u root -pfrif2003 -e "CREATE USER IF NOT EXISTS 'xui_user'@'localhost' IDENTIFIED BY 'xui_password';"
+    mysql -u root -pfrif2003 -e "GRANT ALL PRIVILEGES ON xui_db.* TO 'xui_user'@'localhost';"
+    mysql -u root -pfrif2003 -e "FLUSH PRIVILEGES;"
+
     # Распаковка и настройка
     tar zxvf x-ui-linux-$(arch).tar.gz
     rm -f x-ui-linux-$(arch).tar.gz
