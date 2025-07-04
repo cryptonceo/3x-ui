@@ -115,7 +115,7 @@ func runWebServer() {
 
 func resetSetting() {
 	// Используем ту же строку DSN для согласованности
-	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "xui_user:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
 	err := database.InitDB(dsn)
 	if err != nil {
 		fmt.Println("Failed to initialize database:", err)
@@ -201,7 +201,7 @@ func updateTgbotEnableSts(status bool) {
 
 func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime string) {
 	// Используем ту же строку DSN
-	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "xui_user:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
 	err := database.InitDB(dsn)
 	if err != nil {
 		fmt.Println("Error initializing database:", err)
@@ -240,7 +240,7 @@ func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime stri
 
 func updateSetting(port int, username string, password string, webBasePath string, listenIP string, resetTwoFactor bool) {
 	// Используем ту же строку DSN
-	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "xui_user:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
 	err := database.InitDB(dsn)
 	if err != nil {
 		fmt.Println("Database initialization failed:", err)
@@ -300,7 +300,7 @@ func updateSetting(port int, username string, password string, webBasePath strin
 
 func updateCert(publicKey string, privateKey string) {
 	// Используем ту же строку DSN
-	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "xui_user:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
 	err := database.InitDB(dsn)
 	if err != nil {
 		fmt.Println(err)
@@ -359,7 +359,7 @@ func GetListenIP(getListen bool) {
 
 func migrateDb() {
 	// Используем ту же строку DSN
-	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "xui_user:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
 	err := database.InitDB(dsn)
 	if err != nil {
 		log.Fatal(err)
