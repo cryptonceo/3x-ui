@@ -158,7 +158,7 @@ install_x-ui() {
     fi
 
     # URL для загрузки из вашего репозитория
-    url="https://github.com/${repo_owner}/${repo_name}/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
+    url="https://github.com/${repo_owner}/${repo_name}/releases/download/v2.6.1/x-ui-linux-$(arch).tar.gz"
     wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz "${url}"
     if [[ $? -ne 0 ]]; then
         echo -e "${red}Download x-ui ${tag_version} failed. Please check if the version exists in your repository.${plain}"
