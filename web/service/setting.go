@@ -1,634 +1,685 @@
 package service
 
 import (
-	_ "embed"
+	"archive/zip"
+	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"reflect"
+	"io"
+	"io/fs"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"x-ui/config"
 	"x-ui/database"
-	"x-ui/database/model"
 	"x-ui/logger"
 	"x-ui/util/common"
-	"x-ui/util/random"
-	"x-ui/util/reflect_util"
-	"x-ui/web/entity"
+	"x-ui/util/sys"
 	"x-ui/xray"
+
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/disk"
+	"github.com/shirou/gopsutil/v4/host"
+	"github.com/shirou/gopsutil/v4/load"
+	"github.com/shirou/gopsutil/v4/mem"
+	"github.com/shirou/gopsutil/v4/net"
 )
 
-//go:embed config.json
-var xrayTemplateConfig string
+type ProcessState string
 
-var defaultValueMap = map[string]string{
-	"xrayTemplateConfig":          xrayTemplateConfig,
-	"webListen":                   "",
-	"webDomain":                   "",
-	"webPort":                     "2053",
-	"webCertFile":                 "",
-	"webKeyFile":                  "",
-	"secret":                      random.Seq(32),
-	"webBasePath":                 "/",
-	"sessionMaxAge":               "60",
-	"pageSize":                    "50",
-	"expireDiff":                  "0",
-	"trafficDiff":                 "0",
-	"remarkModel":                 "-ieo",
-	"timeLocation":                "Local",
-	"tgBotEnable":                 "false",
-	"tgBotToken":                  "",
-	"tgBotProxy":                  "",
-	"tgBotAPIServer":              "",
-	"tgBotChatId":                 "",
-	"tgRunTime":                   "@daily",
-	"tgBotBackup":                 "false",
-	"tgBotLoginNotify":            "true",
-	"tgCpu":                       "80",
-	"tgLang":                      "en-US",
-	"twoFactorEnable":             "false",
-	"twoFactorToken":              "",
-	"subEnable":                   "false",
-	"subTitle":                    "",
-	"subListen":                   "",
-	"subPort":                     "2096",
-	"subPath":                     "/sub/",
-	"subDomain":                   "",
-	"subCertFile":                 "",
-	"subKeyFile":                  "",
-	"subUpdates":                  "12",
-	"subEncrypt":                  "true",
-	"subShowInfo":                 "true",
-	"subURI":                      "",
-	"subJsonPath":                 "/json/",
-	"subJsonURI":                  "",
-	"subJsonFragment":             "",
-	"subJsonNoises":               "",
-	"subJsonMux":                  "",
-	"subJsonRules":                "",
-	"datepicker":                  "gregorian",
-	"warp":                        "",
-	"externalTrafficInformEnable": "false",
-	"externalTrafficInformURI":    "",
+const (
+	Running ProcessState = "running"
+	Stop    ProcessState = "stop"
+	Error   ProcessState = "error"
+)
+
+type Status struct {
+	T           time.Time `json:"-"`
+	Cpu         float64   `json:"cpu"`
+	CpuCores    int       `json:"cpuCores"`
+	LogicalPro  int       `json:"logicalPro"`
+	CpuSpeedMhz float64   `json:"cpuSpeedMhz"`
+	Mem         struct {
+		Current uint64 `json:"current"`
+		Total   uint64 `json:"total"`
+	} `json:"mem"`
+	Swap struct {
+		Current uint64 `json:"current"`
+		Total   uint64 `json:"total"`
+	} `json:"swap"`
+	Disk struct {
+		Current uint64 `json:"current"`
+		Total   uint64 `json:"total"`
+	} `json:"disk"`
+	Xray struct {
+		State    ProcessState `json:"state"`
+		ErrorMsg string       `json:"errorMsg"`
+		Version  string       `json:"version"`
+	} `json:"xray"`
+	Uptime   uint64    `json:"uptime"`
+	Loads    []float64 `json:"loads"`
+	TcpCount int       `json:"tcpCount"`
+	UdpCount int       `json:"udpCount"`
+	NetIO    struct {
+		Up   uint64 `json:"up"`
+		Down uint64 `json:"down"`
+	} `json:"netIO"`
+	NetTraffic struct {
+		Sent uint64 `json:"sent"`
+		Recv uint64 `json:"recv"`
+	} `json:"netTraffic"`
+	PublicIP struct {
+		IPv4 string `json:"ipv4"`
+		IPv6 string `json:"ipv6"`
+	} `json:"publicIP"`
+	AppStats struct {
+		Threads uint32 `json:"threads"`
+		Mem     uint64 `json:"mem"`
+		Uptime  uint64 `json:"uptime"`
+	} `json:"appStats"`
 }
 
-type SettingService struct{}
-
-func (s *SettingService) GetDefaultJsonConfig() (any, error) {
-	var jsonData any
-	err := json.Unmarshal([]byte(xrayTemplateConfig), &jsonData)
-	if err != nil {
-		return nil, err
-	}
-	return jsonData, nil
+type Release struct {
+	TagName string `json:"tag_name"`
 }
 
-func (s *SettingService) GetAllSetting() (*entity.AllSetting, error) {
-	db := database.GetDB()
-	settings := make([]*model.Setting, 0)
-	err := db.Model(model.Setting{}).Not("key = ?", "xrayTemplateConfig").Find(&settings).Error
+type ServerService struct {
+	xrayService    XrayService
+	inboundService InboundService
+	cachedIPv4     string
+	cachedIPv6     string
+}
+
+func getPublicIP(url string) string {
+	resp, err := http.Get(url)
 	if err != nil {
-		return nil, err
+		return "N/A"
 	}
-	allSetting := &entity.AllSetting{}
-	t := reflect.TypeOf(allSetting).Elem()
-	v := reflect.ValueOf(allSetting).Elem()
-	fields := reflect_util.GetFields(t)
+	defer resp.Body.Close()
 
-	setSetting := func(key, value string) (err error) {
-		defer func() {
-			panicErr := recover()
-			if panicErr != nil {
-				err = errors.New(fmt.Sprint(panicErr))
-			}
-		}()
-
-		var found bool
-		var field reflect.StructField
-		for _, f := range fields {
-			if f.Tag.Get("json") == key {
-				field = f
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			// Some settings are automatically generated, no need to return to the front end to modify the user
-			return nil
-		}
-
-		fieldV := v.FieldByName(field.Name)
-		switch t := fieldV.Interface().(type) {
-		case int:
-			n, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				return err
-			}
-			fieldV.SetInt(n)
-		case string:
-			fieldV.SetString(value)
-		case bool:
-			fieldV.SetBool(value == "true")
-		default:
-			return common.NewErrorf("unknown field %v type %v", key, t)
-		}
-		return
+	ip, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "N/A"
 	}
 
-	keyMap := map[string]bool{}
-	for _, setting := range settings {
-		err := setSetting(setting.Key, setting.Value)
+	ipString := string(ip)
+	if ipString == "" {
+		return "N/A"
+	}
+
+	return ipString
+}
+
+func (s *ServerService) GetStatus(lastStatus *Status) *Status {
+	now := time.Now()
+	status := &Status{
+		T: now,
+	}
+
+	// CPU stats
+	percents, err := cpu.Percent(0, false)
+	if err != nil {
+		logger.Warning("get cpu percent failed:", err)
+	} else {
+		status.Cpu = percents[0]
+	}
+
+	status.CpuCores, err = cpu.Counts(false)
+	if err != nil {
+		logger.Warning("get cpu cores count failed:", err)
+	}
+
+	status.LogicalPro = runtime.NumCPU()
+
+	cpuInfos, err := cpu.Info()
+	if err != nil {
+		logger.Warning("get cpu info failed:", err)
+	} else if len(cpuInfos) > 0 {
+		status.CpuSpeedMhz = cpuInfos[0].Mhz
+	} else {
+		logger.Warning("could not find cpu info")
+	}
+
+	// Uptime
+	upTime, err := host.Uptime()
+	if err != nil {
+		logger.Warning("get uptime failed:", err)
+	} else {
+		status.Uptime = upTime
+	}
+
+	// Memory stats
+	memInfo, err := mem.VirtualMemory()
+	if err != nil {
+		logger.Warning("get virtual memory failed:", err)
+	} else {
+		status.Mem.Current = memInfo.Used
+		status.Mem.Total = memInfo.Total
+	}
+
+	swapInfo, err := mem.SwapMemory()
+	if err != nil {
+		logger.Warning("get swap memory failed:", err)
+	} else {
+		status.Swap.Current = swapInfo.Used
+		status.Swap.Total = swapInfo.Total
+	}
+
+	// Disk stats
+	diskInfo, err := disk.Usage("/")
+	if err != nil {
+		logger.Warning("get disk usage failed:", err)
+	} else {
+		status.Disk.Current = diskInfo.Used
+		status.Disk.Total = diskInfo.Total
+	}
+
+	// Load averages
+	avgState, err := load.Avg()
+	if err != nil {
+		logger.Warning("get load avg failed:", err)
+	} else {
+		status.Loads = []float64{avgState.Load1, avgState.Load5, avgState.Load15}
+	}
+
+	// Network stats
+	ioStats, err := net.IOCounters(false)
+	if err != nil {
+		logger.Warning("get io counters failed:", err)
+	} else if len(ioStats) > 0 {
+		ioStat := ioStats[0]
+		status.NetTraffic.Sent = ioStat.BytesSent
+		status.NetTraffic.Recv = ioStat.BytesRecv
+
+		if lastStatus != nil {
+			duration := now.Sub(lastStatus.T)
+			seconds := float64(duration) / float64(time.Second)
+			up := uint64(float64(status.NetTraffic.Sent-lastStatus.NetTraffic.Sent) / seconds)
+			down := uint64(float64(status.NetTraffic.Recv-lastStatus.NetTraffic.Recv) / seconds)
+			status.NetIO.Up = up
+			status.NetIO.Down = down
+		}
+	} else {
+		logger.Warning("can not find io counters")
+	}
+
+	// TCP/UDP connections
+	status.TcpCount, err = sys.GetTCPCount()
+	if err != nil {
+		logger.Warning("get tcp connections failed:", err)
+	}
+
+	status.UdpCount, err = sys.GetUDPCount()
+	if err != nil {
+		logger.Warning("get udp connections failed:", err)
+	}
+
+	// IP fetching with caching
+	if s.cachedIPv4 == "" || s.cachedIPv6 == "" {
+		s.cachedIPv4 = getPublicIP("https://api.ipify.org")
+		s.cachedIPv6 = getPublicIP("https://api6.ipify.org")
+	}
+	status.PublicIP.IPv4 = s.cachedIPv4
+	status.PublicIP.IPv6 = s.cachedIPv6
+
+	// Xray status
+	if s.xrayService.IsXrayRunning() {
+		status.Xray.State = Running
+		status.Xray.ErrorMsg = ""
+	} else {
+		err := s.xrayService.GetXrayErr()
 		if err != nil {
-			return nil, err
+			status.Xray.State = Error
+		} else {
+			status.Xray.State = Stop
 		}
-		keyMap[setting.Key] = true
+		status.Xray.ErrorMsg = s.xrayService.GetXrayResult()
+	}
+	status.Xray.Version = s.xrayService.GetXrayVersion()
+
+	// Application stats
+	var rtm runtime.MemStats
+	runtime.ReadMemStats(&rtm)
+	status.AppStats.Mem = rtm.Sys
+	status.AppStats.Threads = uint32(runtime.NumGoroutine())
+	if p != nil && p.IsRunning() {
+		status.AppStats.Uptime = p.GetUptime()
+	} else {
+		status.AppStats.Uptime = 0
 	}
 
-	for key, value := range defaultValueMap {
-		if keyMap[key] {
+	return status
+}
+
+func (s *ServerService) GetXrayVersions() ([]string, error) {
+	const (
+		XrayURL    = "https://api.github.com/repos/XTLS/Xray-core/releases"
+		bufferSize = 8192
+	)
+
+	resp, err := http.Get(XrayURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	buffer := bytes.NewBuffer(make([]byte, bufferSize))
+	buffer.Reset()
+	if _, err := buffer.ReadFrom(resp.Body); err != nil {
+		return nil, err
+	}
+
+	var releases []Release
+	if err := json.Unmarshal(buffer.Bytes(), &releases); err != nil {
+		return nil, err
+	}
+
+	var versions []string
+	for _, release := range releases {
+		tagVersion := strings.TrimPrefix(release.TagName, "v")
+		tagParts := strings.Split(tagVersion, ".")
+		if len(tagParts) != 3 {
 			continue
 		}
-		err := setSetting(key, value)
-		if err != nil {
-			return nil, err
+
+		major, err1 := strconv.Atoi(tagParts[0])
+		minor, err2 := strconv.Atoi(tagParts[1])
+		patch, err3 := strconv.Atoi(tagParts[2])
+		if err1 != nil || err2 != nil || err3 != nil {
+			continue
+		}
+
+		if major > 25 || (major == 25 && minor > 6) || (major == 25 && minor == 6 && patch >= 8) {
+			versions = append(versions, release.TagName)
 		}
 	}
-
-	return allSetting, nil
+	return versions, nil
 }
 
-func (s *SettingService) ResetSettings() error {
-	db := database.GetDB()
-	err := db.Where("1 = 1").Delete(model.Setting{}).Error
+func (s *ServerService) StopXrayService() error {
+	err := s.xrayService.StopXray()
 	if err != nil {
+		logger.Error("stop xray failed:", err)
 		return err
 	}
-	return db.Model(model.User{}).
-		Where("1 = 1").Error
+	return nil
 }
 
-func (s *SettingService) getSetting(key string) (*model.Setting, error) {
-	db := database.GetDB()
-	setting := &model.Setting{}
-	err := db.Model(model.Setting{}).Where("key = ?", key).First(setting).Error
+func (s *ServerService) RestartXrayService() error {
+	s.xrayService.StopXray()
+	err := s.xrayService.RestartXray(true)
 	if err != nil {
-		return nil, err
-	}
-	return setting, nil
-}
-
-func (s *SettingService) saveSetting(key string, value string) error {
-	setting, err := s.getSetting(key)
-	db := database.GetDB()
-	if database.IsNotFound(err) {
-		return db.Create(&model.Setting{
-			Key:   key,
-			Value: value,
-		}).Error
-	} else if err != nil {
+		logger.Error("start xray failed:", err)
 		return err
 	}
-	setting.Key = key
-	setting.Value = value
-	return db.Save(setting).Error
+	return nil
 }
 
-func (s *SettingService) getString(key string) (string, error) {
-	setting, err := s.getSetting(key)
-	if database.IsNotFound(err) {
-		value, ok := defaultValueMap[key]
-		if !ok {
-			return "", common.NewErrorf("key <%v> not in defaultValueMap", key)
-		}
-		return value, nil
-	} else if err != nil {
-		return "", err
+func (s *ServerService) downloadXRay(version string) (string, error) {
+	osName := runtime.GOOS
+	arch := runtime.GOARCH
+
+	switch osName {
+	case "darwin":
+		osName = "macos"
 	}
-	return setting.Value, nil
-}
 
-func (s *SettingService) setString(key string, value string) error {
-	return s.saveSetting(key, value)
-}
-
-func (s *SettingService) getBool(key string) (bool, error) {
-	str, err := s.getString(key)
-	if err != nil {
-		return false, err
+	switch arch {
+	case "amd64":
+		arch = "64"
+	case "arm64":
+		arch = "arm64-v8a"
+	case "armv7":
+		arch = "arm32-v7a"
+	case "armv6":
+		arch = "arm32-v6"
+	case "armv5":
+		arch = "arm32-v5"
+	case "386":
+		arch = "32"
+	case "s390x":
+		arch = "s390x"
 	}
-	return strconv.ParseBool(str)
-}
 
-func (s *SettingService) setBool(key string, value bool) error {
-	return s.setString(key, strconv.FormatBool(value))
-}
-
-func (s *SettingService) getInt(key string) (int, error) {
-	str, err := s.getString(key)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(str)
-}
-
-func (s *SettingService) setInt(key string, value int) error {
-	return s.setString(key, strconv.Itoa(value))
-}
-
-func (s *SettingService) GetXrayConfigTemplate() (string, error) {
-	return s.getString("xrayTemplateConfig")
-}
-
-func (s *SettingService) GetListen() (string, error) {
-	return s.getString("webListen")
-}
-
-func (s *SettingService) SetListen(ip string) error {
-	return s.setString("webListen", ip)
-}
-
-func (s *SettingService) GetWebDomain() (string, error) {
-	return s.getString("webDomain")
-}
-
-func (s *SettingService) GetTgBotToken() (string, error) {
-	return s.getString("tgBotToken")
-}
-
-func (s *SettingService) SetTgBotToken(token string) error {
-	return s.setString("tgBotToken", token)
-}
-
-func (s *SettingService) GetTgBotProxy() (string, error) {
-	return s.getString("tgBotProxy")
-}
-
-func (s *SettingService) SetTgBotProxy(token string) error {
-	return s.setString("tgBotProxy", token)
-}
-
-func (s *SettingService) GetTgBotAPIServer() (string, error) {
-	return s.getString("tgBotAPIServer")
-}
-
-func (s *SettingService) SetTgBotAPIServer(token string) error {
-	return s.setString("tgBotAPIServer", token)
-}
-
-func (s *SettingService) GetTgBotChatId() (string, error) {
-	return s.getString("tgBotChatId")
-}
-
-func (s *SettingService) SetTgBotChatId(chatIds string) error {
-	return s.setString("tgBotChatId", chatIds)
-}
-
-func (s *SettingService) GetTgbotEnabled() (bool, error) {
-	return s.getBool("tgBotEnable")
-}
-
-func (s *SettingService) SetTgbotEnabled(value bool) error {
-	return s.setBool("tgBotEnable", value)
-}
-
-func (s *SettingService) GetTgbotRuntime() (string, error) {
-	return s.getString("tgRunTime")
-}
-
-func (s *SettingService) SetTgbotRuntime(time string) error {
-	return s.setString("tgRunTime", time)
-}
-
-func (s *SettingService) GetTgBotBackup() (bool, error) {
-	return s.getBool("tgBotBackup")
-}
-
-func (s *SettingService) GetTgBotLoginNotify() (bool, error) {
-	return s.getBool("tgBotLoginNotify")
-}
-
-func (s *SettingService) GetTgCpu() (int, error) {
-	return s.getInt("tgCpu")
-}
-
-func (s *SettingService) GetTgLang() (string, error) {
-	return s.getString("tgLang")
-}
-
-func (s *SettingService) GetTwoFactorEnable() (bool, error) {
-	return s.getBool("twoFactorEnable")
-}
-
-func (s *SettingService) SetTwoFactorEnable(value bool) error {
-	return s.setBool("twoFactorEnable", value)
-}
-
-func (s *SettingService) GetTwoFactorToken() (string, error) {
-	return s.getString("twoFactorToken")
-}
-
-func (s *SettingService) SetTwoFactorToken(value string) error {
-	return s.setString("twoFactorToken", value)
-}
-
-func (s *SettingService) GetPort() (int, error) {
-	return s.getInt("webPort")
-}
-
-func (s *SettingService) SetPort(port int) error {
-	return s.setInt("webPort", port)
-}
-
-func (s *SettingService) SetCertFile(webCertFile string) error {
-	return s.setString("webCertFile", webCertFile)
-}
-
-func (s *SettingService) GetCertFile() (string, error) {
-	return s.getString("webCertFile")
-}
-
-func (s *SettingService) SetKeyFile(webKeyFile string) error {
-	return s.setString("webKeyFile", webKeyFile)
-}
-
-func (s *SettingService) GetKeyFile() (string, error) {
-	return s.getString("webKeyFile")
-}
-
-func (s *SettingService) GetExpireDiff() (int, error) {
-	return s.getInt("expireDiff")
-}
-
-func (s *SettingService) GetTrafficDiff() (int, error) {
-	return s.getInt("trafficDiff")
-}
-
-func (s *SettingService) GetSessionMaxAge() (int, error) {
-	return s.getInt("sessionMaxAge")
-}
-
-func (s *SettingService) GetRemarkModel() (string, error) {
-	return s.getString("remarkModel")
-}
-
-func (s *SettingService) GetSecret() ([]byte, error) {
-	secret, err := s.getString("secret")
-	if secret == defaultValueMap["secret"] {
-		err := s.saveSetting("secret", secret)
-		if err != nil {
-			logger.Warning("save secret failed:", err)
-		}
-	}
-	return []byte(secret), err
-}
-
-func (s *SettingService) SetBasePath(basePath string) error {
-	if !strings.HasPrefix(basePath, "/") {
-		basePath = "/" + basePath
-	}
-	if !strings.HasSuffix(basePath, "/") {
-		basePath += "/"
-	}
-	return s.setString("webBasePath", basePath)
-}
-
-func (s *SettingService) GetBasePath() (string, error) {
-	basePath, err := s.getString("webBasePath")
+	fileName := fmt.Sprintf("Xray-%s-%s.zip", osName, arch)
+	url := fmt.Sprintf("https://github.com/XTLS/Xray-core/releases/download/%s/%s", version, fileName)
+	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
 	}
-	if !strings.HasPrefix(basePath, "/") {
-		basePath = "/" + basePath
-	}
-	if !strings.HasSuffix(basePath, "/") {
-		basePath += "/"
-	}
-	return basePath, nil
-}
+	defer resp.Body.Close()
 
-func (s *SettingService) GetTimeLocation() (*time.Location, error) {
-	l, err := s.getString("timeLocation")
+	os.Remove(fileName)
+	file, err := os.Create(fileName)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	location, err := time.LoadLocation(l)
+	defer file.Close()
+
+	_, err = io.Copy(file, resp.Body)
 	if err != nil {
-		defaultLocation := defaultValueMap["timeLocation"]
-		logger.Errorf("location <%v> not exist, using default location: %v", l, defaultLocation)
-		return time.LoadLocation(defaultLocation)
+		return "", err
 	}
-	return location, nil
+
+	return fileName, nil
 }
 
-func (s *SettingService) GetSubEnable() (bool, error) {
-	return s.getBool("subEnable")
-}
-
-func (s *SettingService) GetSubTitle() (string, error) {
-	return s.getString("subTitle")
-}
-
-func (s *SettingService) GetSubListen() (string, error) {
-	return s.getString("subListen")
-}
-
-func (s *SettingService) GetSubPort() (int, error) {
-	return s.getInt("subPort")
-}
-
-func (s *SettingService) GetSubPath() (string, error) {
-	return s.getString("subPath")
-}
-
-func (s *SettingService) GetSubJsonPath() (string, error) {
-	return s.getString("subJsonPath")
-}
-
-func (s *SettingService) GetSubDomain() (string, error) {
-	return s.getString("subDomain")
-}
-
-func (s *SettingService) GetSubCertFile() (string, error) {
-	return s.getString("subCertFile")
-}
-
-func (s *SettingService) GetSubKeyFile() (string, error) {
-	return s.getString("subKeyFile")
-}
-
-func (s *SettingService) GetSubUpdates() (string, error) {
-	return s.getString("subUpdates")
-}
-
-func (s *SettingService) GetSubEncrypt() (bool, error) {
-	return s.getBool("subEncrypt")
-}
-
-func (s *SettingService) GetSubShowInfo() (bool, error) {
-	return s.getBool("subShowInfo")
-}
-
-func (s *SettingService) GetPageSize() (int, error) {
-	return s.getInt("pageSize")
-}
-
-func (s *SettingService) GetSubURI() (string, error) {
-	return s.getString("subURI")
-}
-
-func (s *SettingService) GetSubJsonURI() (string, error) {
-	return s.getString("subJsonURI")
-}
-
-func (s *SettingService) GetSubJsonFragment() (string, error) {
-	return s.getString("subJsonFragment")
-}
-
-func (s *SettingService) GetSubJsonNoises() (string, error) {
-	return s.getString("subJsonNoises")
-}
-
-func (s *SettingService) GetSubJsonMux() (string, error) {
-	return s.getString("subJsonMux")
-}
-
-func (s *SettingService) GetSubJsonRules() (string, error) {
-	return s.getString("subJsonRules")
-}
-
-func (s *SettingService) GetDatepicker() (string, error) {
-	return s.getString("datepicker")
-}
-
-func (s *SettingService) GetWarp() (string, error) {
-	return s.getString("warp")
-}
-
-func (s *SettingService) SetWarp(data string) error {
-	return s.setString("warp", data)
-}
-
-func (s *SettingService) GetExternalTrafficInformEnable() (bool, error) {
-	return s.getBool("externalTrafficInformEnable")
-}
-
-func (s *SettingService) SetExternalTrafficInformEnable(value bool) error {
-	return s.setBool("externalTrafficInformEnable", value)
-}
-
-func (s *SettingService) GetExternalTrafficInformURI() (string, error) {
-	return s.getString("externalTrafficInformURI")
-}
-
-func (s *SettingService) SetExternalTrafficInformURI(InformURI string) error {
-	return s.setString("externalTrafficInformURI", InformURI)
-}
-
-func (s *SettingService) GetIpLimitEnable() (bool, error) {
-	accessLogPath, err := xray.GetAccessLogPath()
+func (s *ServerService) UpdateXray(version string) error {
+	zipFileName, err := s.downloadXRay(version)
 	if err != nil {
-		return false, err
-	}
-	return (accessLogPath != "none" && accessLogPath != ""), nil
-}
-
-func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
-	if err := allSetting.CheckValid(); err != nil {
 		return err
 	}
 
-	v := reflect.ValueOf(allSetting).Elem()
-	t := reflect.TypeOf(allSetting).Elem()
-	fields := reflect_util.GetFields(t)
-	errs := make([]error, 0)
-	for _, field := range fields {
-		key := field.Tag.Get("json")
-		fieldV := v.FieldByName(field.Name)
-		value := fmt.Sprint(fieldV.Interface())
-		err := s.saveSetting(key, value)
-		if err != nil {
-			errs = append(errs, err)
-		}
+	zipFile, err := os.Open(zipFileName)
+	if err != nil {
+		return err
 	}
-	return common.Combine(errs...)
+	defer func() {
+		zipFile.Close()
+		os.Remove(zipFileName)
+	}()
+
+	stat, err := zipFile.Stat()
+	if err != nil {
+		return err
+	}
+	reader, err := zip.NewReader(zipFile, stat.Size())
+	if err != nil {
+		return err
+	}
+
+	s.xrayService.StopXray()
+	defer func() {
+		err := s.xrayService.RestartXray(true)
+		if err != nil {
+			logger.Error("start xray failed:", err)
+		}
+	}()
+
+	copyZipFile := func(zipName string, fileName string) error {
+		zipFile, err := reader.Open(zipName)
+		if err != nil {
+			return err
+		}
+		os.Remove(fileName)
+		file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR|os.O_TRUNC, fs.ModePerm)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		_, err = io.Copy(file, zipFile)
+		return err
+	}
+
+	err = copyZipFile("xray", xray.GetBinaryPath())
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (s *SettingService) GetDefaultXrayConfig() (any, error) {
+func (s *ServerService) GetLogs(count string, level string, syslog string) []string {
+	c, _ := strconv.Atoi(count)
+	var lines []string
+
+	if syslog == "true" {
+		cmdArgs := []string{"journalctl", "-u", "x-ui", "--no-pager", "-n", count, "-p", level}
+		// Run the command
+		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		err := cmd.Run()
+		if err != nil {
+			return []string{"Failed to run journalctl command!"}
+		}
+		lines = strings.Split(out.String(), "\n")
+	} else {
+		lines = logger.GetLogs(c, level)
+	}
+
+	return lines
+}
+
+func (s *ServerService) GetConfigJson() (any, error) {
+	config, err := s.xrayService.GetXrayConfig()
+	if err != nil {
+		return nil, err
+	}
+	contents, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+
 	var jsonData any
-	err := json.Unmarshal([]byte(xrayTemplateConfig), &jsonData)
+	err = json.Unmarshal(contents, &jsonData)
 	if err != nil {
 		return nil, err
 	}
+
 	return jsonData, nil
 }
 
-func (s *SettingService) GetDefaultSettings(host string) (any, error) {
-	type settingFunc func() (any, error)
-	settings := map[string]settingFunc{
-		"expireDiff":    func() (any, error) { return s.GetExpireDiff() },
-		"trafficDiff":   func() (any, error) { return s.GetTrafficDiff() },
-		"pageSize":      func() (any, error) { return s.GetPageSize() },
-		"defaultCert":   func() (any, error) { return s.GetCertFile() },
-		"defaultKey":    func() (any, error) { return s.GetKeyFile() },
-		"tgBotEnable":   func() (any, error) { return s.GetTgbotEnabled() },
-		"subEnable":     func() (any, error) { return s.GetSubEnable() },
-		"subTitle":      func() (any, error) { return s.GetSubTitle() },
-		"subURI":        func() (any, error) { return s.GetSubURI() },
-		"subJsonURI":    func() (any, error) { return s.GetSubJsonURI() },
-		"remarkModel":   func() (any, error) { return s.GetRemarkModel() },
-		"datepicker":    func() (any, error) { return s.GetDatepicker() },
-		"ipLimitEnable": func() (any, error) { return s.GetIpLimitEnable() },
+func (s *ServerService) GetDb() ([]byte, error) {
+	// Update by manually trigger a checkpoint operation
+	err := database.Checkpoint()
+	if err != nil {
+		return nil, err
+	}
+	// Open the file for reading
+	file, err := os.Open(config.GetDBPath())
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Read the file contents
+	fileContents, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
 	}
 
-	result := make(map[string]any)
+	return fileContents, nil
+}
 
-	for key, fn := range settings {
-		value, err := fn()
+func (s *ServerService) ImportDB(file multipart.File) error {
+	// Check if the file is a SQLite database
+	isValidDb, err := database.IsSQLiteDB(file)
+	if err != nil {
+		return common.NewErrorf("Error checking db file format: %v", err)
+	}
+	if !isValidDb {
+		return common.NewError("Invalid db file format")
+	}
+
+	// Reset the file reader to the beginning
+	_, err = file.Seek(0, 0)
+	if err != nil {
+		return common.NewErrorf("Error resetting file reader: %v", err)
+	}
+
+	// Save the file as a temporary file
+	tempPath := fmt.Sprintf("%s.temp", config.GetDBPath())
+
+	// Remove the existing temporary file (if any)
+	if _, err := os.Stat(tempPath); err == nil {
+		if errRemove := os.Remove(tempPath); errRemove != nil {
+			return common.NewErrorf("Error removing existing temporary db file: %v", errRemove)
+		}
+	}
+
+	// Create the temporary file
+	tempFile, err := os.Create(tempPath)
+	if err != nil {
+		return common.NewErrorf("Error creating temporary db file: %v", err)
+	}
+
+	// Robust deferred cleanup for the temporary file
+	defer func() {
+		if tempFile != nil {
+			if cerr := tempFile.Close(); cerr != nil {
+				logger.Warningf("Warning: failed to close temp file: %v", cerr)
+			}
+		}
+		if _, err := os.Stat(tempPath); err == nil {
+			if rerr := os.Remove(tempPath); rerr != nil {
+				logger.Warningf("Warning: failed to remove temp file: %v", rerr)
+			}
+		}
+	}()
+
+	// Save uploaded file to temporary file
+	if _, err = io.Copy(tempFile, file); err != nil {
+		return common.NewErrorf("Error saving db: %v", err)
+	}
+
+	// Check if we can init the db or not
+	if err = database.InitDB(); err != nil {
+		return common.NewErrorf("Error checking db: %v", err)
+	}
+
+	// Stop Xray
+	s.StopXrayService()
+
+	// Backup the current database for fallback
+	fallbackPath := fmt.Sprintf("%s.backup", config.GetDBPath())
+
+	// Remove the existing fallback file (if any)
+	if _, err := os.Stat(fallbackPath); err == nil {
+		if errRemove := os.Remove(fallbackPath); errRemove != nil {
+			return common.NewErrorf("Error removing existing fallback db file: %v", errRemove)
+		}
+	}
+
+	// Move the current database to the fallback location
+	if err = os.Rename(config.GetDBPath(), fallbackPath); err != nil {
+		return common.NewErrorf("Error backing up current db file: %v", err)
+	}
+
+	// Defer fallback cleanup ONLY if everything goes well
+	defer func() {
+		if _, err := os.Stat(fallbackPath); err == nil {
+			if rerr := os.Remove(fallbackPath); rerr != nil {
+				logger.Warningf("Warning: failed to remove fallback file: %v", rerr)
+			}
+		}
+	}()
+
+	// Move temp to DB path
+	if err = os.Rename(tempPath, config.GetDBPath()); err != nil {
+		// Restore from fallback
+		if errRename := os.Rename(fallbackPath, config.GetDBPath()); errRename != nil {
+			return common.NewErrorf("Error moving db file and restoring fallback: %v", errRename)
+		}
+		return common.NewErrorf("Error moving db file: %v", err)
+	}
+
+	// Migrate DB
+	if err = database.InitDB(); err != nil {
+		if errRename := os.Rename(fallbackPath, config.GetDBPath()); errRename != nil {
+			return common.NewErrorf("Error migrating db and restoring fallback: %v", errRename)
+		}
+		return common.NewErrorf("Error migrating db: %v", err)
+	}
+
+	s.inboundService.MigrateDB()
+
+	// Start Xray
+	if err = s.RestartXrayService(); err != nil {
+		return common.NewErrorf("Imported DB but failed to start Xray: %v", err)
+	}
+
+	return nil
+}
+
+func (s *ServerService) UpdateGeofile(fileName string) error {
+	files := []struct {
+		URL      string
+		FileName string
+	}{
+		{"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat", "geoip.dat"},
+		{"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat", "geosite.dat"},
+		{"https://github.com/chocolate4u/Iran-v2ray-rules/releases/latest/download/geoip.dat", "geoip_IR.dat"},
+		{"https://github.com/chocolate4u/Iran-v2ray-rules/releases/latest/download/geosite.dat", "geosite_IR.dat"},
+		{"https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat", "geoip_RU.dat"},
+		{"https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat", "geosite_RU.dat"},
+	}
+
+	downloadFile := func(url, destPath string) error {
+		resp, err := http.Get(url)
 		if err != nil {
-			return "", err
+			return common.NewErrorf("Failed to download Geofile from %s: %v", url, err)
 		}
-		result[key] = value
+		defer resp.Body.Close()
+
+		file, err := os.Create(destPath)
+		if err != nil {
+			return common.NewErrorf("Failed to create Geofile %s: %v", destPath, err)
+		}
+		defer file.Close()
+
+		_, err = io.Copy(file, resp.Body)
+		if err != nil {
+			return common.NewErrorf("Failed to save Geofile %s: %v", destPath, err)
+		}
+
+		return nil
 	}
 
-	if result["subEnable"].(bool) && (result["subURI"].(string) == "" || result["subJsonURI"].(string) == "") {
-		subURI := ""
-		subTitle, _ := s.GetSubTitle()
-		subPort, _ := s.GetSubPort()
-		subPath, _ := s.GetSubPath()
-		subJsonPath, _ := s.GetSubJsonPath()
-		subDomain, _ := s.GetSubDomain()
-		subKeyFile, _ := s.GetSubKeyFile()
-		subCertFile, _ := s.GetSubCertFile()
-		subTLS := false
-		if subKeyFile != "" && subCertFile != "" {
-			subTLS = true
-		}
-		if subDomain == "" {
-			subDomain = strings.Split(host, ":")[0]
-		}
-		if subTLS {
-			subURI = "https://"
-		} else {
-			subURI = "http://"
-		}
-		if (subPort == 443 && subTLS) || (subPort == 80 && !subTLS) {
-			subURI += subDomain
-		} else {
-			subURI += fmt.Sprintf("%s:%d", subDomain, subPort)
-		}
-		if result["subURI"].(string) == "" {
-			result["subURI"] = subURI + subPath
-		}
-		if result["subTitle"].(string) == "" {
-			result["subTitle"] = subTitle
-		}
-		if result["subJsonURI"].(string) == "" {
-			result["subJsonURI"] = subURI + subJsonPath
+	var fileURL string
+	for _, file := range files {
+		if file.FileName == fileName {
+			fileURL = file.URL
+			break
 		}
 	}
 
-	return result, nil
+	if fileURL == "" {
+		return common.NewErrorf("File '%s' not found in the list of Geofiles", fileName)
+	}
+
+	destPath := fmt.Sprintf("%s/%s", config.GetBinFolderPath(), fileName)
+
+	if err := downloadFile(fileURL, destPath); err != nil {
+		return common.NewErrorf("Error downloading Geofile '%s': %v", fileName, err)
+	}
+
+	err := s.RestartXrayService()
+	if err != nil {
+		return common.NewErrorf("Updated Geofile '%s' but Failed to start Xray: %v", fileName, err)
+	}
+
+	return nil
+}
+
+func (s *ServerService) GetNewX25519Cert() (any, error) {
+	// Run the command
+	cmd := exec.Command(xray.GetBinaryPath(), "x25519")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(out.String(), "\n")
+
+	privateKeyLine := strings.Split(lines[0], ":")
+	publicKeyLine := strings.Split(lines[1], ":")
+
+	privateKey := strings.TrimSpace(privateKeyLine[1])
+	publicKey := strings.TrimSpace(publicKeyLine[1])
+
+	keyPair := map[string]any{
+		"privateKey": privateKey,
+		"publicKey":  publicKey,
+	}
+
+	return keyPair, nil
 }
