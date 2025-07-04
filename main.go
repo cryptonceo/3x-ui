@@ -43,7 +43,7 @@ func runWebServer() {
 	godotenv.Load()
 
 	// Используем строку DSN для MariaDB вместо config.GetDBPath()
-	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "xui_user:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
 	err := database.InitDB(dsn)
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
