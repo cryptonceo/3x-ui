@@ -42,7 +42,8 @@ func runWebServer() {
 
 	godotenv.Load()
 
-	err := database.InitDB(config.GetDBPath())
+	dsn := "root:password@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	err := database.InitDB(dsn)
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
 	}
