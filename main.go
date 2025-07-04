@@ -42,6 +42,7 @@ func runWebServer() {
 
 	godotenv.Load()
 
+	// Используем строку DSN для MariaDB вместо config.GetDBPath()
 	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
 	err := database.InitDB(dsn)
 	if err != nil {
@@ -113,7 +114,9 @@ func runWebServer() {
 }
 
 func resetSetting() {
-	err := database.InitDB(config.GetDBPath())
+	// Используем ту же строку DSN для согласованности
+	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	err := database.InitDB(dsn)
 	if err != nil {
 		fmt.Println("Failed to initialize database:", err)
 		return
@@ -197,7 +200,9 @@ func updateTgbotEnableSts(status bool) {
 }
 
 func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime string) {
-	err := database.InitDB(config.GetDBPath())
+	// Используем ту же строку DSN
+	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	err := database.InitDB(dsn)
 	if err != nil {
 		fmt.Println("Error initializing database:", err)
 		return
@@ -234,7 +239,9 @@ func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime stri
 }
 
 func updateSetting(port int, username string, password string, webBasePath string, listenIP string, resetTwoFactor bool) {
-	err := database.InitDB(config.GetDBPath())
+	// Используем ту же строку DSN
+	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	err := database.InitDB(dsn)
 	if err != nil {
 		fmt.Println("Database initialization failed:", err)
 		return
@@ -292,7 +299,9 @@ func updateSetting(port int, username string, password string, webBasePath strin
 }
 
 func updateCert(publicKey string, privateKey string) {
-	err := database.InitDB(config.GetDBPath())
+	// Используем ту же строку DSN
+	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	err := database.InitDB(dsn)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -337,7 +346,6 @@ func GetCertificate(getCert bool) {
 
 func GetListenIP(getListen bool) {
 	if getListen {
-
 		settingService := service.SettingService{}
 		ListenIP, err := settingService.GetListen()
 		if err != nil {
@@ -350,13 +358,14 @@ func GetListenIP(getListen bool) {
 }
 
 func migrateDb() {
-	inboundService := service.InboundService{}
-
-	err := database.InitDB(config.GetDBPath())
+	// Используем ту же строку DSN
+	dsn := "root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+	err := database.InitDB(dsn)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Start migrating database...")
+	inboundService := service.InboundService{}
 	inboundService.MigrateDB()
 	fmt.Println("Migration done!")
 }
@@ -399,8 +408,6 @@ func main() {
 	settingCmd.BoolVar(&resetTwoFactor, "resetTwoFactor", false, "Reset two-factor authentication settings")
 	settingCmd.BoolVar(&getListen, "getListen", false, "Display current panel listenIP IP")
 	settingCmd.BoolVar(&getCert, "getCert", false, "Display current certificate settings")
-	settingCmd.StringVar(&webCertFile, "webCert", "", "Set path to public key file for panel")
-	settingCmd.StringVar(&webKeyFile, "webCertKey", "", "Set path to private key file for panel")
 	settingCmd.StringVar(&tgbottoken, "tgbottoken", "", "Set token for Telegram bot")
 	settingCmd.StringVar(&tgbotRuntime, "tgbotRuntime", "", "Set cron time for Telegram bot notifications")
 	settingCmd.StringVar(&tgbotchatid, "tgbotchatid", "", "Set chat ID for Telegram bot notifications")
@@ -452,7 +459,7 @@ func main() {
 		if getCert {
 			GetCertificate(getCert)
 		}
-		if (tgbottoken != "") || (tgbotchatid != "") || (tgbotRuntime != "") {
+		if (tgbottoken != "" || tgbotchatid != "" || tgbotRuntime != "") {
 			updateTgbotSetting(tgbottoken, tgbotchatid, tgbotRuntime)
 		}
 		if enabletgbot {
