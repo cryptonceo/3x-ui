@@ -151,12 +151,6 @@ install_x-ui() {
     repo_name="3x-ui"
 
     if [ $# == 0 ]; then
-        # Если версия не указана, используем последнюю из вашего репозитория
-        tag_version=$(curl -Ls "https://api.github.com/repos/${repo_owner}/${repo_name}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        if [[ ! -n "$tag_version" ]]; then
-            echo -e "${red}Failed to fetch x-ui version from your repository. Please specify a version manually (e.g., ./install.sh v1.2.3)${plain}"
-            exit 1
-        fi
         echo -e "Got x-ui latest version from your repository: ${tag_version}, beginning the installation..."
     else
         tag_version=$1
