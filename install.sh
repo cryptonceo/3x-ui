@@ -8,7 +8,7 @@ plain='\033[0m'
 
 cur_dir=$(pwd)
 
-# check root
+# Check root
 [[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: ${plain} Please run this script with root privilege \n " && exit 1
 
 # Check OS and set release variable
@@ -41,7 +41,6 @@ echo "Arch: $(arch)"
 
 check_glibc_version() {
     glibc_version=$(ldd --version | head -n1 | awk '{print $NF}')
-    
     required_version="2.32"
     if [[ "$(printf '%s\n' "$required_version" "$glibc_version" | sort -V | head -n1)" != "$required_version" ]]; then
         echo -e "${red}GLIBC version $glibc_version is too old! Required: 2.32 or higher${plain}"
@@ -55,24 +54,39 @@ check_glibc_version
 install_base() {
     case "${release}" in
     ubuntu | debian | armbian)
-        apt-get update && apt-get install -y -q wget curl tar tzdata
+        apt-get update && apt-get install -y -q wget curl tar tzdata mariadb-server
         ;;
     centos | rhel | almalinux | rocky | ol)
-        yum -y update && yum install -y -q wget curl tar tzdata
+        yum -y update && yum install -y -q wget curl tar tzdata mariadb-server
         ;;
     fedora | amzn | virtuozzo)
-        dnf -y update && dnf install -y -q wget curl tar tzdata
+        dnf -y update && dnf install -y -q wget curl tar tzdata mariadb-server
         ;;
     arch | manjaro | parch)
-        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata
+        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata mariadb
         ;;
     opensuse-tumbleweed)
-        zypper refresh && zypper -q install -y wget curl tar timezone
+        zypper refresh && zypper -q install -y wget curl tar timezone mariadb
         ;;
     *)
-        apt-get update && apt install -y -q wget curl tar tzdata
+        apt-get update && apt install -y -q wget curl tar tzdata mariadb-server
         ;;
     esac
+}
+
+setup_mysql() {
+    echo "Starting MariaDB service..."
+    systemctl start mariadb
+    systemctl enable mariadb
+
+    echo "Creating MySQL database 'xui_db' and user..."
+    mysql -u root -pfrif2003 -e "CREATE DATABASE IF NOT EXISTS xui_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" || {
+        echo -e "${red}Error creating database. Check MySQL access or password.${plain}"
+        exit 1
+    }
+    mysql -u root -pfrif2003 -e "CREATE USER IF NOT EXISTS 'xui_user'@'localhost' IDENTIFIED BY 'xui_password';"
+    mysql -u root -pfrif2003 -e "GRANT ALL PRIVILEGES ON xui_db.* TO 'xui_user'@'localhost';"
+    mysql -u root -pfrif2003 -e "FLUSH PRIVILEGES;"
 }
 
 gen_random_string() {
@@ -176,6 +190,8 @@ install_x-ui() {
         systemctl stop x-ui
         rm /usr/local/x-ui/ -rf
     fi
+
+    setup_mysql
 
     tar zxvf x-ui-linux-$(arch).tar.gz
     rm x-ui-linux-$(arch).tar.gz -f
