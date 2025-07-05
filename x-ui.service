@@ -1,14 +1,29 @@
-[Unit] Description=x-ui After=network.target
+[Unit]
+Description=x-ui Service
+Documentation=https://github.com/cryptonceo/3x-ui
+After=network.target mariadb.service
+Wants=mariadb.service
+Requires=mariadb.service
 
 [Service]
-Environment="XUI_DEBUG=true"
-Environment="XUI_DB_TYPE=mysql"
-Environment="XUI_DB_DSN=root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
-Environment="XRAY_VMESS_AEAD_FORCED=false"
 Type=simple
-WorkingDirectory=/usr/local/x-ui/
+User=root
+WorkingDirectory=/usr/local/x-ui
 ExecStart=/usr/local/x-ui/x-ui
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s
+LimitNOFILE=1048576
+LimitNPROC=512
 
-[Install] WantedBy=multi-user.target
+# Environment variables for MySQL
+Environment="XUI_DB_TYPE=mysql"
+Environment="XUI_DB_DSN=xui_user:xui_password@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+Environment="XUI_LOG_LEVEL=info"
+Environment="XUI_DEBUG=false"
+
+# Load environment file if it exists
+EnvironmentFile=-/etc/x-ui/.env
+
+[Install]
+WantedBy=multi-user.target

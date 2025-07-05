@@ -2,7 +2,7 @@ package database
 
 import (
 	"bytes"
-	// "fmt"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -74,7 +74,7 @@ func initUser() error {
 func runSeeders(isUsersEmpty bool) error {
 	empty, err := isTableEmpty("history_of_seeders")
 	if err != nil {
-		log.Printf("Error checking if users table is empty: %v", err)
+		log.Printf("Error checking if history_of_seeders table is empty: %v", err)
 		return err
 	}
 
@@ -116,11 +116,53 @@ func isTableEmpty(tableName string) (bool, error) {
 	return count == 0, err
 }
 
+// setupMySQLDatabase ensures MySQL database and user exist
+func setupMySQLDatabase() error {
+	username, password, host, port, database := config.GetMySQLConfig()
+	
+	log.Printf("Setting up MySQL database: %s on %s:%s", database, host, port)
+	
+	// Create a temporary connection to MySQL server (without specifying database)
+	tempDSN := fmt.Sprintf("%s:%s@tcp(%s:%s)/?charset=utf8mb4&parseTime=True&loc=Local", 
+		username, password, host, port)
+	
+	tempDB, err := gorm.Open(mysql.Open(tempDSN), &gorm.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to connect to MySQL server: %v", err)
+	}
+	
+	// Create database if it doesn't exist
+	sqlDB, err := tempDB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying sql.DB: %v", err)
+	}
+	defer sqlDB.Close()
+	
+	// Create database
+	err = tempDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", database)).Error
+	if err != nil {
+		return fmt.Errorf("failed to create database %s: %v", database, err)
+	}
+	
+	log.Printf("MySQL database '%s' is ready", database)
+	return nil
+}
+
 func InitDB() error {
     dbType := config.GetDBType()
     var dialector gorm.Dialector
+    
+    log.Printf("Initializing database with type: %s", dbType)
+    
     if dbType == "mysql" {
+        // Setup MySQL database first
+        if err := setupMySQLDatabase(); err != nil {
+            log.Printf("Warning: MySQL setup failed: %v", err)
+            log.Printf("Continuing with existing database...")
+        }
+        
         dsn := config.GetDBDSN()
+        log.Printf("Connecting to MySQL with DSN: %s", dsn)
         dialector = mysql.Open(dsn)
     } else {
         // Default to SQLite
@@ -128,35 +170,50 @@ func InitDB() error {
         dir := path.Dir(dbPath)
         err := os.MkdirAll(dir, fs.ModePerm)
         if err != nil {
-            return err
+            return fmt.Errorf("failed to create database directory: %v", err)
         }
+        log.Printf("Using SQLite database at: %s", dbPath)
         dialector = sqlite.Open(dbPath)
     }
+    
     var gormLogger logger.Interface
     if config.IsDebug() {
         gormLogger = logger.Default
     } else {
         gormLogger = logger.Discard
     }
+    
     c := &gorm.Config{
         Logger: gormLogger,
     }
+    
     var err error
     db, err = gorm.Open(dialector, c)
     if err != nil {
-        return err
+        return fmt.Errorf("failed to connect to database: %v", err)
     }
+    
+    log.Printf("Database connection established successfully")
+    
     if err := initModels(); err != nil {
-        return err
+        return fmt.Errorf("failed to initialize models: %v", err)
     }
+    
     isUsersEmpty, err := isTableEmpty("users")
     if err != nil {
-        return err
+        return fmt.Errorf("failed to check users table: %v", err)
     }
+    
     if err := initUser(); err != nil {
-        return err
+        return fmt.Errorf("failed to initialize user: %v", err)
     }
-    return runSeeders(isUsersEmpty)
+    
+    if err := runSeeders(isUsersEmpty); err != nil {
+        return fmt.Errorf("failed to run seeders: %v", err)
+    }
+    
+    log.Printf("Database initialization completed successfully")
+    return nil
 }
 
 func CloseDB() error {
@@ -189,5 +246,5 @@ func IsSQLiteDB(file io.ReaderAt) (bool, error) {
 }
 
 func Checkpoint() error {
-        return nil // MySQL не требует checkpoint
-    }
+    return nil // MySQL doesn't require checkpoint
+}
