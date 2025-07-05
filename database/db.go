@@ -189,12 +189,5 @@ func IsSQLiteDB(file io.ReaderAt) (bool, error) {
 }
 
 func Checkpoint() error {
-    dbType := config.GetDBType()
-    if dbType == "mysql" {
         return nil // MySQL не требует checkpoint
     }
-    err := db.Exec("PRAGMA wal_checkpoint;").Error
-    if err != nil {
-        return err
-    }
-    return nil

@@ -65,9 +65,9 @@ type HistoryOfSeeders struct {
 }
 
 type Setting struct {
-    Id    int    `json:"id" form:"id" gorm:"primaryKey;autoIncrement"`
-    Key   string `json:"key" form:"key" gorm:"type:VARCHAR(255);not null"`
-    Value string `json:"value" form:"value" gorm:"type:VARCHAR(255)"`
+    Id        int    `json:"id" form:"id" gorm:"primaryKey;autoIncrement"`
+    SettingKey string `json:"setting_key" form:"setting_key" gorm:"column:setting_key;type:VARCHAR(255);not null"`
+    Value     string `json:"value" form:"value" gorm:"type:VARCHAR(255)"`
 }
 
 func (i *Inbound) GenXrayInboundConfig() *xray.InboundConfig {
