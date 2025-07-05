@@ -1,6 +1,4 @@
-[Unit]
-Description=x-ui
-After=network.target
+[Unit] Description=x-ui After=network.target
 
 [Service]
 Environment="XUI_DEBUG=true"
@@ -13,5 +11,4 @@ ExecStart=/usr/local/x-ui/x-ui
 Restart=on-failure
 RestartSec=5s
 
-[Install]
-WantedBy=multi-user.target
+[Install] WantedBy=multi-user.target
