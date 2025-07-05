@@ -2,12 +2,12 @@ package database
 
 import (
 	"bytes"
-	"fmt"
+	// "fmt"
 	"io"
-	// "io/fs"
+	"io/fs"
 	"log"
-	// "os"
-	// "path"
+	"os"
+	"path"
 	"slices"
 
 	"x-ui/config"
@@ -29,22 +29,24 @@ const (
 )
 
 func initModels() error {
-	models := []any{
-		&model.User{},
-		&model.Inbound{},
-		&model.OutboundTraffics{},
-		&model.Setting{},
-		&model.InboundClientIps{},
-		&xray.ClientTraffic{},
-		&model.HistoryOfSeeders{},
-	}
-	for _, model := range models {
-		if err := db.AutoMigrate(model); err != nil {
-			log.Printf("Error auto migrating model: %v", err)
-			return err
-		}
-	}
-	return nil
+    log.Println("Running AutoMigrate for models")
+    models := []any{
+        &model.User{},
+        &model.Inbound{},
+        &model.OutboundTraffics{},
+        &model.Setting{},
+        &model.InboundClientIps{},
+        &xray.ClientTraffic{},
+        &model.HistoryOfSeeders{},
+    }
+    for _, model := range models {
+        log.Printf("Migrating model: %T", model)
+        if err := db.AutoMigrate(model); err != nil {
+            log.Printf("Error auto migrating model %T: %v", model, err)
+            return err
+        }
+    }
+    return nil
 }
 
 func initUser() error {
@@ -115,45 +117,46 @@ func isTableEmpty(tableName string) (bool, error) {
 }
 
 func InitDB() error {
-	dbType := config.GetDBType()
-	var dialector gorm.Dialector
-	if dbType == "sqlite" {
-		dbPath := config.GetDBPath()
-		dialector = sqlite.Open(dbPath)
-	} else if dbType == "mysql" {
-		dsn := config.GetDBDSN()
-		if dsn == "" {
-			return fmt.Errorf("XUI_DB_DSN is not set")
-		}
-		dialector = mysql.Open(dsn)
-	} else {
-		return fmt.Errorf("unsupported database type: %s", dbType)
-	}
-	var gormLogger logger.Interface
-	if config.IsDebug() {
-		gormLogger = logger.Default
-	} else {
-		gormLogger = logger.Discard
-	}
-	c := &gorm.Config{
-		Logger: gormLogger,
-	}
-	var err error
-	db, err = gorm.Open(dialector, c)
-	if err != nil {
-		return err
-	}
-	if err := initModels(); err != nil {
-		return err
-	}
-	isUsersEmpty, err := isTableEmpty("users")
-	if err != nil {
-		return err
-	}
-	if err := initUser(); err != nil {
-		return err
-	}
-	return runSeeders(isUsersEmpty)
+    dbType := config.GetDBType()
+    var dialector gorm.Dialector
+    if dbType == "mysql" {
+        dsn := config.GetDBDSN()
+        dialector = mysql.Open(dsn)
+    } else {
+        // Default to SQLite
+        dbPath := config.GetDBPath()
+        dir := path.Dir(dbPath)
+        err := os.MkdirAll(dir, fs.ModePerm)
+        if err != nil {
+            return err
+        }
+        dialector = sqlite.Open(dbPath)
+    }
+    var gormLogger logger.Interface
+    if config.IsDebug() {
+        gormLogger = logger.Default
+    } else {
+        gormLogger = logger.Discard
+    }
+    c := &gorm.Config{
+        Logger: gormLogger,
+    }
+    var err error
+    db, err = gorm.Open(dialector, c)
+    if err != nil {
+        return err
+    }
+    if err := initModels(); err != nil {
+        return err
+    }
+    isUsersEmpty, err := isTableEmpty("users")
+    if err != nil {
+        return err
+    }
+    if err := initUser(); err != nil {
+        return err
+    }
+    return runSeeders(isUsersEmpty)
 }
 
 func CloseDB() error {
@@ -186,10 +189,12 @@ func IsSQLiteDB(file io.ReaderAt) (bool, error) {
 }
 
 func Checkpoint() error {
-	// Update WAL
-	err := db.Exec("PRAGMA wal_checkpoint;").Error
-	if err != nil {
-		return err
-	}
-	return nil
-}
+    dbType := config.GetDBType()
+    if dbType == "mysql" {
+        return nil // MySQL не требует checkpoint
+    }
+    err := db.Exec("PRAGMA wal_checkpoint;").Error
+    if err != nil {
+        return err
+    }
+    return nil
