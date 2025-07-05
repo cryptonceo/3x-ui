@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"x-ui/config"
 	"x-ui/database"
 	"x-ui/database/model"
 	"x-ui/logger"
@@ -1813,20 +1814,38 @@ func (s *InboundService) GetClientTrafficByEmail(email string) (traffic *xray.Cl
 func (s *InboundService) GetClientTrafficByID(id string) ([]xray.ClientTraffic, error) {
 	db := database.GetDB()
 	var traffics []xray.ClientTraffic
-
-	err := db.Model(xray.ClientTraffic{}).Where(`email IN(
-		SELECT JSON_EXTRACT(client.value, '$.email') as email
-		FROM inbounds,
-	  	JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client
-		WHERE
-	  	JSON_EXTRACT(client.value, '$.id') in (?)
-		)`, id).Find(&traffics).Error
-
-	if err != nil {
-		logger.Debug(err)
-		return nil, err
+	dbType := config.GetDBType()
+	
+	if dbType == "mysql" {
+		err := db.Model(xray.ClientTraffic{}).Where(`email IN(
+			SELECT JSON_UNQUOTE(JSON_EXTRACT(client.value, '$.email')) as email
+			FROM inbounds,
+				JSON_TABLE(
+					JSON_EXTRACT(inbounds.settings, '$.clients'),
+					'$[*]' COLUMNS (value JSON PATH '$')
+				) AS client
+			WHERE
+				JSON_EXTRACT(client.value, '$.id') in (?)
+			)`, id).Find(&traffics).Error
+		if err != nil {
+			logger.Debug(err)
+			return nil, err
+		}
+	} else {
+		err := db.Model(xray.ClientTraffic{}).Where(`email IN(
+			SELECT JSON_EXTRACT(client.value, '$.email') as email
+			FROM inbounds,
+				JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client
+			WHERE
+				JSON_EXTRACT(client.value, '$.id') in (?)
+			)`, id).Find(&traffics).Error
+		if err != nil {
+			logger.Debug(err)
+			return nil, err
+		}
 	}
-	return traffics, err
+	
+	return traffics, nil
 }
 
 func (s *InboundService) SearchClientTraffic(query string) (traffic *xray.ClientTraffic, err error) {
@@ -2001,11 +2020,20 @@ func (s *InboundService) MigrationRequirements() {
 		Port           int
 		StreamSettings []byte
 	}
-	err = tx.Raw(`select id, port, stream_settings
-	from inbounds
-	WHERE protocol in ('vmess','vless','trojan')
-	  AND json_extract(stream_settings, '$.security') = 'tls'
-	  AND json_extract(stream_settings, '$.tlsSettings.settings.domains') IS NOT NULL`).Scan(&externalProxy).Error
+	dbType := config.GetDBType()
+	if dbType == "mysql" {
+		err = tx.Raw(`select id, port, stream_settings
+		from inbounds
+		WHERE protocol in ('vmess','vless','trojan')
+		  AND JSON_EXTRACT(stream_settings, '$.security') = 'tls'
+		  AND JSON_EXTRACT(stream_settings, '$.tlsSettings.settings.domains') IS NOT NULL`).Scan(&externalProxy).Error
+	} else {
+		err = tx.Raw(`select id, port, stream_settings
+		from inbounds
+		WHERE protocol in ('vmess','vless','trojan')
+		  AND json_extract(stream_settings, '$.security') = 'tls'
+		  AND json_extract(stream_settings, '$.tlsSettings.settings.domains') IS NOT NULL`).Scan(&externalProxy).Error
+	}
 	if err != nil || len(externalProxy) == 0 {
 		return
 	}

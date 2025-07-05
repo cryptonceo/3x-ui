@@ -540,7 +540,7 @@ func (s *ServerService) ImportDB(file multipart.File) error {
 	}
 
 	// Check if we can init the db or not
-	if err = database.InitDB(tempPath); err != nil {
+	if err = database.InitDB(); err != nil {
 		return common.NewErrorf("Error checking db: %v", err)
 	}
 
@@ -581,7 +581,7 @@ func (s *ServerService) ImportDB(file multipart.File) error {
 	}
 
 	// Migrate DB
-	if err = database.InitDB(config.GetDBPath()); err != nil {
+	if err = database.InitDB(); err != nil {
 		if errRename := os.Rename(fallbackPath, config.GetDBPath()); errRename != nil {
 			return common.NewErrorf("Error migrating db and restoring fallback: %v", errRename)
 		}
