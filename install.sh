@@ -8,10 +8,10 @@ plain='\033[0m'
 
 cur_dir=$(pwd)
 
-# Проверка root-прав
+# check root
 [[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: ${plain} Please run this script with root privilege \n " && exit 1
 
-# Определение ОС
+# Check OS and set release variable
 if [[ -f /etc/os-release ]]; then
     source /etc/os-release
     release=$ID
@@ -24,7 +24,6 @@ else
 fi
 echo "The OS release is: $release"
 
-# Определение архитектуры
 arch() {
     case "$(uname -m)" in
     x86_64 | x64 | amd64) echo 'amd64' ;;
@@ -40,9 +39,9 @@ arch() {
 
 echo "Arch: $(arch)"
 
-# Проверка версии GLIBC
 check_glibc_version() {
     glibc_version=$(ldd --version | head -n1 | awk '{print $NF}')
+    
     required_version="2.32"
     if [[ "$(printf '%s\n' "$required_version" "$glibc_version" | sort -V | head -n1)" != "$required_version" ]]; then
         echo -e "${red}GLIBC version $glibc_version is too old! Required: 2.32 or higher${plain}"
@@ -53,7 +52,6 @@ check_glibc_version() {
 }
 check_glibc_version
 
-# Установка базовых пакетов
 install_base() {
     case "${release}" in
     ubuntu | debian | armbian)
@@ -77,14 +75,12 @@ install_base() {
     esac
 }
 
-# Генерация случайной строки
 gen_random_string() {
     local length="$1"
     local random_string=$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | fold -w "$length" | head -n 1)
     echo "$random_string"
 }
 
-# Настройка после установки
 config_after_install() {
     local existing_hasDefaultCredential=$(/usr/local/x-ui/x-ui setting -show true | grep -Eo 'hasDefaultCredential: .+' | awk '{print $2}')
     local existing_webBasePath=$(/usr/local/x-ui/x-ui setting -show true | grep -Eo 'webBasePath: .+' | awk '{print $2}')
@@ -142,72 +138,51 @@ config_after_install() {
     /usr/local/x-ui/x-ui migrate
 }
 
-# Установка x-ui
 install_x-ui() {
     cd /usr/local/
 
-    # Укажите ваш GitHub-репозиторий
-    repo_owner="cryptonceo"
-    repo_name="3x-ui"
-
     if [ $# == 0 ]; then
-        echo -e "Got x-ui latest version from your repository: ${tag_version}, beginning the installation..."
+        tag_version=$(curl -Ls "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [[ ! -n "$tag_version" ]]; then
+            echo -e "${red}Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later${plain}"
+            exit 1
+        fi
+        echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
+        wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
+        if [[ $? -ne 0 ]]; then
+            echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
+            exit 1
+        fi
     else
         tag_version=$1
-        echo -e "Beginning to install x-ui $1 from your repository..."
+        tag_version_numeric=${tag_version#v}
+        min_version="2.3.5"
+
+        if [[ "$(printf '%s\n' "$min_version" "$tag_version_numeric" | sort -V | head -n1)" != "$min_version" ]]; then
+            echo -e "${red}Please use a newer version (at least v2.3.5). Exiting installation.${plain}"
+            exit 1
+        fi
+
+        url="https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
+        echo -e "Beginning to install x-ui $1"
+        wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz ${url}
+        if [[ $? -ne 0 ]]; then
+            echo -e "${red}Download x-ui $1 failed, please check if the version exists ${plain}"
+            exit 1
+        fi
     fi
 
-    # URL для загрузки из вашего репозитория
-    url="https://github.com/${repo_owner}/${repo_name}/releases/download/v2.6.1/x-ui-linux-$(arch).tar.gz"
-    wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz "${url}"
-    if [[ $? -ne 0 ]]; then
-        echo -e "${red}Download x-ui ${tag_version} failed. Please check if the version exists in your repository.${plain}"
-        exit 1
-    fi
-
-    # Удаление старой версии, если она существует
     if [[ -e /usr/local/x-ui/ ]]; then
         systemctl stop x-ui
-        rm -rf /usr/local/x-ui/
+        rm /usr/local/x-ui/ -rf
     fi
 
-    if ! command -v mysql >/dev/null 2>&1; then
-        echo "MySQL/MariaDB не установлен. Устанавливаем..."
-        case "${release}" in
-        ubuntu | debian | armbian)
-            apt-get update && apt-get install -y mariadb-server
-            systemctl start mariadb
-            systemctl enable mariadb
-            ;;
-        centos | rhel | almalinux | rocky | ol)
-            yum -y install mariadb-server
-            systemctl start mariadb
-            systemctl enable mariadb
-            ;;
-        *)
-            echo "Неподдерживаемая ОС для автоматической установки MySQL."
-            exit 1
-            ;;
-        esac
-    fi
-
-    # Создание базы данных и пользователя
-    echo "Создание базы данных MySQL 'xui_db'..."
-    mysql -u root -pfrif2003 -e "CREATE DATABASE IF NOT EXISTS xui_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" || {
-        echo "Ошибка создания базы данных. Проверьте доступ к MySQL."
-        exit 1
-    }
-    mysql -u root -pfrif2003 -e "CREATE USER IF NOT EXISTS 'xui_user'@'localhost' IDENTIFIED BY 'xui_password';"
-    mysql -u root -pfrif2003 -e "GRANT ALL PRIVILEGES ON xui_db.* TO 'xui_user'@'localhost';"
-    mysql -u root -pfrif2003 -e "FLUSH PRIVILEGES;"
-
-    # Распаковка и настройка
     tar zxvf x-ui-linux-$(arch).tar.gz
-    rm -f x-ui-linux-$(arch).tar.gz
+    rm x-ui-linux-$(arch).tar.gz -f
     cd x-ui
     chmod +x x-ui
 
-    # Проверка архитектуры и переименование файла для ARM
+    # Check the system's architecture and rename the file accordingly
     if [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]]; then
         mv bin/xray-linux-$(arch) bin/xray-linux-arm
         chmod +x bin/xray-linux-arm
@@ -215,12 +190,11 @@ install_x-ui() {
 
     chmod +x x-ui bin/xray-linux-$(arch)
     cp -f x-ui.service /etc/systemd/system/
-    wget -O /usr/bin/x-ui "https://raw.githubusercontent.com/${repo_owner}/${repo_name}/main/x-ui.sh"
+    wget -O /usr/bin/x-ui https://raw.githubusercontent.com/MHSanaei/3x-ui/main/x-ui.sh
     chmod +x /usr/local/x-ui/x-ui.sh
     chmod +x /usr/bin/x-ui
     config_after_install
 
-    # Запуск службы
     systemctl daemon-reload
     systemctl enable x-ui
     systemctl start x-ui
