@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # x-ui MySQL Installation Script
-# Usage: bash <(curl -Ls https://raw.githubusercontent.com/your-username/x-ui/master/install_mysql.sh)
+# Usage: bash <(curl -Ls https://raw.githubusercontent.com/cryptonceo/x-ui/master/install_mysql.sh)
 
 red='\033[0;31m'
 green='\033[0;32m'
@@ -152,7 +152,7 @@ download_and_build() {
     cd /tmp/x-ui-build
     
     # Download x-ui source (you need to replace with your actual repository)
-    git clone https://github.com/your-username/x-ui.git .
+    git clone https://github.com/cryptonceo/x-ui.git .
     
     # Build x-ui
     export GOOS=linux

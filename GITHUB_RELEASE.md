@@ -69,7 +69,7 @@ x-ui v1.0.0 with MySQL Support
 
 ```bash
 # Скачайте релиз
-wget https://github.com/your-username/x-ui/releases/download/v1.0.0-mysql/x-ui-linux-amd64.tar.gz
+wget https://github.com/cryptonceo/x-ui/releases/download/v1.0.0-mysql/x-ui-linux-amd64.tar.gz
 
 # Распакуйте архив
 tar -xzf x-ui-linux-amd64.tar.gz
@@ -111,8 +111,8 @@ sudo ./install.sh
 ## 🔗 Ссылки
 
 - [Документация](README.md)
-- [Issues](https://github.com/your-username/x-ui/issues)
-- [Discussions](https://github.com/your-username/x-ui/discussions)
+- [Issues](https://github.com/cryptonceo/x-ui/issues)
+- [Discussions](https://github.com/cryptonceo/x-ui/discussions)
 
 ## 📄 Лицензия
 
@@ -135,7 +135,7 @@ MIT License
 
 ```bash
 # 1. Скачайте релиз
-wget https://github.com/your-username/x-ui/releases/download/v1.0.0-mysql/x-ui-linux-amd64.tar.gz
+wget https://github.com/cryptonceo/x-ui/releases/download/v1.0.0-mysql/x-ui-linux-amd64.tar.gz
 
 # 2. Распакуйте архив
 tar -xzf x-ui-linux-amd64.tar.gz
