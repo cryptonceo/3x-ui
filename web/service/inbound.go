@@ -86,17 +86,27 @@ func (s *InboundService) GetClients(inbound *model.Inbound) ([]model.Client, err
 }
 
 func (s *InboundService) getAllEmails() ([]string, error) {
-	db := database.GetDB()
-	var emails []string
-	err := db.Raw(`
-		SELECT JSON_EXTRACT(client.value, '$.email')
-		FROM inbounds,
-			JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client
-		`).Scan(&emails).Error
-	if err != nil {
-		return nil, err
-	}
-	return emails, nil
+    db := database.GetDB()
+    var emails []string
+    dbType := config.GetDBType()
+    if dbType == "mysql" {
+        err := db.Raw(`
+            SELECT JSON_UNQUOTE(JSON_EXTRACT(client.value, '$.email')) AS email
+            FROM inbounds,
+                JSON_TABLE(
+                    JSON_EXTRACT(inbounds.settings, '$.clients'),
+                    '$[*]' COLUMNS (value JSON PATH '$')
+                ) AS client
+        `).Scan(&emails).Error
+        return emails, err
+    } else {
+        err := db.Raw(`
+            SELECT JSON_EXTRACT(client.value, '$.email')
+            FROM inbounds,
+                JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client
+        `).Scan(&emails).Error
+        return emails, err
+    }
 }
 
 func (s *InboundService) contains(slice []string, str string) bool {
@@ -1119,15 +1129,30 @@ func (s *InboundService) GetInboundTags() (string, error) {
 }
 
 func (s *InboundService) MigrationRemoveOrphanedTraffics() {
-	db := database.GetDB()
-	db.Exec(`
-		DELETE FROM client_traffics
-		WHERE email NOT IN (
-			SELECT JSON_EXTRACT(client.value, '$.email')
-			FROM inbounds,
-				JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client
-		)
-	`)
+    db := database.GetDB()
+    dbType := config.GetDBType()
+    if dbType == "mysql" {
+        db.Exec(`
+            DELETE FROM client_traffics
+            WHERE email NOT IN (
+                SELECT JSON_UNQUOTE(JSON_EXTRACT(client.value, '$.email'))
+                FROM inbounds,
+                    JSON_TABLE(
+                        JSON_EXTRACT(inbounds.settings, '$.clients'),
+                        '$[*]' COLUMNS (value JSON PATH '$')
+                    ) AS client
+            )
+        `)
+    } else {
+        db.Exec(`
+            DELETE FROM client_traffics
+            WHERE email NOT IN (
+                SELECT JSON_EXTRACT(client.value, '$.email')
+                FROM inbounds,
+                    JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client
+            )
+        `)
+    }
 }
 
 func (s *InboundService) AddClientStat(tx *gorm.DB, inboundId int, client *model.Client) error {
