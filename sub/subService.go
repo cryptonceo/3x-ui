@@ -107,13 +107,20 @@ func (s *SubService) GetSubs(subId string, host string) ([]string, string, error
 func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) {
 	db := database.GetDB()
 	var inbounds []*model.Inbound
+	
+	// Use MySQL-compatible JSON functions
 	err := db.Model(model.Inbound{}).Preload("ClientStats").Where(`id in (
 		SELECT DISTINCT inbounds.id
 		FROM inbounds,
-			JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client 
+			JSON_TABLE(
+				JSON_EXTRACT(inbounds.settings, '$.clients'),
+				'$[*]' COLUMNS (
+					subId VARCHAR(255) PATH '$.subId'
+				)
+			) AS client 
 		WHERE
 			protocol in ('vmess','vless','trojan','shadowsocks')
-			AND JSON_EXTRACT(client.value, '$.subId') = ? AND enable = ?
+			AND client.subId = ? AND enable = ?
 	)`, subId, true).Find(&inbounds).Error
 	if err != nil {
 		return nil, err
@@ -133,9 +140,11 @@ func (s *SubService) getClientTraffics(traffics []xray.ClientTraffic, email stri
 func (s *SubService) getFallbackMaster(dest string, streamSettings string) (string, int, string, error) {
 	db := database.GetDB()
 	var inbound *model.Inbound
+	
+	// Use MySQL-compatible JSON functions
 	err := db.Model(model.Inbound{}).
-		Where("JSON_TYPE(settings, '$.fallbacks') = 'array'").
-		Where("EXISTS (SELECT * FROM json_each(settings, '$.fallbacks') WHERE json_extract(value, '$.dest') = ?)", dest).
+		Where("JSON_TYPE(JSON_EXTRACT(settings, '$.fallbacks')) = 'array'").
+		Where("EXISTS (SELECT 1 FROM JSON_TABLE(JSON_EXTRACT(settings, '$.fallbacks'), '$[*]' COLUMNS (dest VARCHAR(255) PATH '$.dest')) AS fallback WHERE fallback.dest = ?)", dest).
 		Find(&inbound).Error
 	if err != nil {
 		return "", 0, "", err
