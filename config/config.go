@@ -75,13 +75,9 @@ func GetLogFolder() string {
 }
 
 func GetDBType() string {
-	dbType := os.Getenv("XUI_DB_TYPE")
-	if dbType == "" {
-		return "sqlite"
-	}
-	return dbType
+    return os.Getenv("XUI_DB_TYPE")
 }
 
 func GetDBDSN() string {
-	return os.Getenv("XUI_DB_DSN")
+    return os.Getenv("XUI_DB_DSN")
 }
