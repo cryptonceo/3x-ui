@@ -1,5 +1,17 @@
-[Unit] Description=x-ui Service After=network.target
+[Unit]
+Description=x-ui
+After=network.target
 
-[Service] User=root ExecStart=/usr/local/bin/x-ui Restart=always StandardOutput=syslog StandardError=syslog SyslogIdentifier=x-ui Environment="XUI_DB_TYPE=mysql" Environment="XUI_DB_DSN=root:frif2003@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+[Service]
+Environment="XUI_DEBUG=true"
+Environment="XUI_DB_TYPE=mysql"
+Environment="XUI_DB_DSN=root:frif2003@tcp(172.20.241.138:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
+Environment="XRAY_VMESS_AEAD_FORCED=false"
+Type=simple
+WorkingDirectory=/usr/local/x-ui/
+ExecStart=/usr/local/x-ui/x-ui
+Restart=on-failure
+RestartSec=5s
 
-[Install] WantedBy=multi-user.target
+[Install]
+WantedBy=multi-user.target
