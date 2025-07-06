@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: 3x-ui-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: frif2003
+      MYSQL_DATABASE: 3x-ui
+      MYSQL_USER: root
+      MYSQL_PASSWORD: frif2003
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql-init.sql:/docker-entrypoint-initdb.d/mysql-init.sql
+    ports:
+      - "3306:3306"
+    networks:
+      - 3x-ui-network
+    command: --default-authentication-plugin=mysql_native_password
+
+  x-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.mysql
+    container_name: 3x-ui-app
+    restart: unless-stopped
+    depends_on:
+      - mysql
+    environment:
+      - XUI_MYSQL_HOST=mysql
+      - XUI_MYSQL_PORT=3306
+      - XUI_MYSQL_USER=root
+      - XUI_MYSQL_PASSWORD=frif2003
+      - XUI_MYSQL_DATABASE=3x-ui
+      - XUI_DEBUG=false
+      - XUI_LOG_LEVEL=info
+    ports:
+      - "54321:54321"
+    volumes:
+      - xui_logs:/var/log/x-ui
+      - xui_config:/usr/local/x-ui
+    networks:
+      - 3x-ui-network
+
+volumes:
+  mysql_data:
+    driver: local
+  xui_logs:
+    driver: local
+  xui_config:
+    driver: local
+
+networks:
+  3x-ui-network:
+    driver: bridge 

@@ -8,7 +8,7 @@ plain='\033[0m'
 
 cur_dir=$(pwd)
 
-# Check root
+# check root
 [[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: ${plain} Please run this script with root privilege \n " && exit 1
 
 # Check OS and set release variable
@@ -41,6 +41,7 @@ echo "Arch: $(arch)"
 
 check_glibc_version() {
     glibc_version=$(ldd --version | head -n1 | awk '{print $NF}')
+    
     required_version="2.32"
     if [[ "$(printf '%s\n' "$required_version" "$glibc_version" | sort -V | head -n1)" != "$required_version" ]]; then
         echo -e "${red}GLIBC version $glibc_version is too old! Required: 2.32 or higher${plain}"
@@ -54,58 +55,24 @@ check_glibc_version
 install_base() {
     case "${release}" in
     ubuntu | debian | armbian)
-        apt-get update && apt-get install -y -q wget curl tar tzdata mariadb-server fail2ban ufw unzip git
+        apt-get update && apt-get install -y -q wget curl tar tzdata
         ;;
     centos | rhel | almalinux | rocky | ol)
-        yum -y update && yum install -y -q wget curl tar tzdata mariadb-server fail2ban ufw unzip git
+        yum -y update && yum install -y -q wget curl tar tzdata
         ;;
     fedora | amzn | virtuozzo)
-        dnf -y update && dnf install -y -q wget curl tar tzdata mariadb-server fail2ban ufw unzip git
+        dnf -y update && dnf install -y -q wget curl tar tzdata
         ;;
     arch | manjaro | parch)
-        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata mariadb fail2ban ufw unzip git
+        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata
         ;;
     opensuse-tumbleweed)
-        zypper refresh && zypper -q install -y wget curl tar timezone mariadb fail2ban ufw unzip git
+        zypper refresh && zypper -q install -y wget curl tar timezone
         ;;
     *)
-        apt-get update && apt install -y -q wget curl tar tzdata mariadb-server fail2ban ufw unzip git
+        apt-get update && apt install -y -q wget curl tar tzdata
         ;;
     esac
-    # Configure UFW
-    ufw allow 22
-    ufw allow 80
-    ufw allow 443
-    ufw --force enable
-    # Configure Fail2ban
-    systemctl enable fail2ban
-    systemctl start fail2ban
-}
-
-setup_mysql() {
-    echo "Starting MariaDB service..."
-    systemctl start mariadb
-    systemctl enable mariadb
-
-    # Set root password if not set
-    mysql -u root -e "SET PASSWORD FOR 'root'@'localhost' = PASSWORD('frif2003');" 2>/dev/null || {
-        echo "Root password already set or error occurred, proceeding..."
-    }
-
-    echo "Creating MySQL database 'xui_db' and user..."
-    mysql -u root -pfrif2003 -e "CREATE DATABASE IF NOT EXISTS xui_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" || {
-        echo -e "${red}Error creating database. Check MySQL access or password.${plain}"
-        exit 1
-    }
-    mysql -u root -pfrif2003 -e "CREATE USER IF NOT EXISTS 'xui_user'@'localhost' IDENTIFIED BY 'xui_password';"
-    mysql -u root -pfrif2003 -e "GRANT ALL PRIVILEGES ON xui_db.* TO 'xui_user'@'localhost';"
-    mysql -u root -pfrif2003 -e "FLUSH PRIVILEGES;"
-
-    # Enhance MySQL security
-    mysql -u root -pfrif2003 -e "DELETE FROM mysql.user WHERE User='';"
-    mysql -u root -pfrif2003 -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
-    mysql -u root carr-pfrif2003 -e "DROP DATABASE IF EXISTS test;"
-    mysql -u root -pfrif2003 -e "FLUSH PRIVILEGES;"
 }
 
 gen_random_string() {
@@ -162,7 +129,7 @@ config_after_install() {
             echo -e "###############################################"
             echo -e "${green}Username: ${config_username}${plain}"
             echo -e "${green}Password: ${config_password}${plain}"
-3939            echo -e "###############################################"
+            echo -e "###############################################"
         else
             echo -e "${green}Username, Password, and WebBasePath are properly set. Exiting...${plain}"
         fi
@@ -209,8 +176,6 @@ install_x-ui() {
         systemctl stop x-ui
         rm /usr/local/x-ui/ -rf
     fi
-
-    setup_mysql
 
     tar zxvf x-ui-linux-$(arch).tar.gz
     rm x-ui-linux-$(arch).tar.gz -f

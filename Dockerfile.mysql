@@ -1,0 +1,82 @@
+# Dockerfile для 3x-ui MySQL Edition
+FROM ubuntu:22.04
+
+# Устанавливаем переменные окружения
+ENV DEBIAN_FRONTEND=noninteractive
+ENV GO_VERSION=1.24.4
+ENV MYSQL_HOST=mysql
+ENV MYSQL_PORT=3306
+ENV MYSQL_USER=root
+ENV MYSQL_PASSWORD=frif2003
+ENV MYSQL_DATABASE=3x-ui
+
+# Обновляем систему и устанавливаем зависимости
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    unzip \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем Go
+RUN wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz \
+    && tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz \
+    && rm go${GO_VERSION}.linux-amd64.tar.gz
+
+# Добавляем Go в PATH
+ENV PATH=$PATH:/usr/local/go/bin
+
+# Создаем рабочую директорию
+WORKDIR /app
+
+# Копируем файлы проекта
+COPY . .
+
+# Скачиваем зависимости и собираем проект
+RUN go mod download \
+    && go mod tidy \
+    && GOOS=linux GOARCH=amd64 go build -o x-ui main.go
+
+# Создаем директории
+RUN mkdir -p /usr/local/x-ui \
+    && mkdir -p /var/log/x-ui
+
+# Копируем файлы в директорию установки
+RUN cp x-ui /usr/local/x-ui/ \
+    && cp -r web /usr/local/x-ui/ \
+    && cp -r config /usr/local/x-ui/ \
+    && cp -r database /usr/local/x-ui/ \
+    && cp -r logger /usr/local/x-ui/ \
+    && cp -r sub /usr/local/x-ui/ \
+    && cp -r util /usr/local/x-ui/ \
+    && cp -r xray /usr/local/x-ui/
+
+# Устанавливаем права
+RUN chmod +x /usr/local/x-ui/x-ui \
+    && chown -R root:root /usr/local/x-ui
+
+# Создаем скрипт запуска
+RUN echo '#!/bin/bash\n\
+echo "Waiting for MySQL to be ready..."\n\
+while ! mysqladmin ping -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --silent; do\n\
+    sleep 1\n\
+done\n\
+echo "MySQL is ready!"\n\
+cd /usr/local/x-ui\n\
+./x-ui\n\
+' > /usr/local/bin/start.sh \
+    && chmod +x /usr/local/bin/start.sh
+
+# Открываем порт
+EXPOSE 54321
+
+# Устанавливаем рабочую директорию
+WORKDIR /usr/local/x-ui
+
+# Запускаем приложение
+CMD ["/usr/local/bin/start.sh"] 

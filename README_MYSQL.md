@@ -1,333 +1,208 @@
-# x-ui with MySQL Support
+# 3x-ui MySQL Edition
 
-This is a modified version of x-ui that supports MySQL database instead of SQLite. The application has been updated to work seamlessly with MySQL while maintaining all original functionality.
+Версия 3x-ui панели, адаптированная для работы с MySQL вместо SQLite.
 
-## Features
+## Особенности
 
-- ✅ Full MySQL support with automatic database setup
-- ✅ Improved performance compared to SQLite
-- ✅ Better concurrent user handling
-- ✅ Automatic MySQL installation and configuration
-- ✅ Systemd service integration
-- ✅ Environment-based configuration
-- ✅ Firewall configuration
-- ✅ All original x-ui features
+- Полная поддержка MySQL 8.0+
+- Автоматическое создание базы данных и таблиц
+- Оптимизированная производительность для больших нагрузок
+- Поддержка транзакций и ACID свойств
+- Лучшая масштабируемость
 
-## Quick Installation
+## Системные требования
 
-### Option 1: Automated Installation (Recommended)
+- Ubuntu 20.04+ / Debian 11+
+- MySQL 8.0+
+- Go 1.24.4+
+- Минимум 1GB RAM
+- 10GB свободного места
+
+## Установка
+
+### 1. Клонирование репозитория
 
 ```bash
-# Download and run the installation script
-curl -Ls https://raw.githubusercontent.com/your-repo/x-ui-mysql/main/install_xui_mysql.sh | sudo bash
+git clone https://github.com/your-username/3x-ui-mysql.git
+cd 3x-ui-mysql
 ```
 
-### Option 2: Manual Installation
+### 2. Установка MySQL
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-repo/x-ui-mysql.git
-cd x-ui-mysql
-
-# Make scripts executable
-chmod +x install_xui_mysql.sh
 chmod +x install_mysql.sh
-
-# Run installation
-sudo ./install_xui_mysql.sh
+sudo ./install_mysql.sh
 ```
 
-## Manual Setup
-
-If you prefer to set up manually:
-
-### 1. Install Dependencies
+### 3. Сборка и установка
 
 ```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install -y curl wget git unzip mariadb-server mariadb-client
-
-# CentOS/RHEL/Rocky Linux
-sudo yum install -y curl wget git unzip mariadb-server mariadb
+chmod +x build_linux.sh
+sudo ./build_linux.sh
 ```
 
-### 2. Install Go
+### 4. Запуск сервиса
 
 ```bash
-# Download Go
-wget https://golang.org/dl/go1.21.0.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz
-
-# Add to PATH
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### 3. Setup MySQL
-
-```bash
-# Start and enable MySQL
-sudo systemctl start mariadb
-sudo systemctl enable mariadb
-
-# Secure MySQL installation
-sudo mysql_secure_installation
-
-# Create database and user
-sudo mysql -u root -p
-```
-
-In MySQL prompt:
-```sql
-CREATE DATABASE xui_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'xui_user'@'localhost' IDENTIFIED BY 'xui_password';
-GRANT ALL PRIVILEGES ON xui_db.* TO 'xui_user'@'localhost';
-FLUSH PRIVILEGES;
-EXIT;
-```
-
-### 4. Build x-ui
-
-```bash
-# Clone repository
-git clone https://github.com/your-repo/x-ui-mysql.git
-cd x-ui-mysql
-
-# Build
-go mod tidy
-go build -o x-ui main.go
-```
-
-### 5. Configure Environment
-
-```bash
-# Create configuration directory
-sudo mkdir -p /etc/x-ui
-
-# Create environment file
-sudo tee /etc/x-ui/.env > /dev/null <<EOF
-XUI_DB_TYPE=mysql
-XUI_DB_DSN=xui_user:xui_password@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local
-XUI_LOG_LEVEL=info
-XUI_DEBUG=false
-EOF
-
-# Set permissions
-sudo chmod 600 /etc/x-ui/.env
-```
-
-### 6. Setup Systemd Service
-
-```bash
-# Copy service file
-sudo cp x-ui.service /etc/systemd/system/
-
-# Create override directory
-sudo mkdir -p /etc/systemd/system/x-ui.service.d
-
-# Create override file
-sudo tee /etc/systemd/system/x-ui.service.d/override.conf > /dev/null <<EOF
-[Service]
-EnvironmentFile=/etc/x-ui/.env
-EOF
-
-# Reload systemd
-sudo systemctl daemon-reload
-sudo systemctl enable x-ui.service
-```
-
-### 7. Start x-ui
-
-```bash
-# Start the service
 sudo systemctl start x-ui
+sudo systemctl enable x-ui
+```
 
-# Check status
+## Конфигурация
+
+### Переменные окружения
+
+Вы можете настроить подключение к MySQL через переменные окружения:
+
+```bash
+export XUI_MYSQL_HOST=localhost
+export XUI_MYSQL_PORT=3306
+export XUI_MYSQL_USER=root
+export XUI_MYSQL_PASSWORD=frif2003
+export XUI_MYSQL_DATABASE=3x-ui
+export XUI_DEBUG=true
+export XUI_LOG_LEVEL=info
+```
+
+### Конфигурация по умолчанию
+
+- **Хост**: localhost
+- **Порт**: 3306
+- **Пользователь**: root
+- **Пароль**: frif2003
+- **База данных**: 3x-ui
+
+## Структура базы данных
+
+### Таблицы
+
+1. **users** - Пользователи панели
+2. **inbounds** - Входящие соединения
+3. **outbound_traffics** - Статистика исходящего трафика
+4. **settings** - Настройки системы
+5. **inbound_client_ips** - IP адреса клиентов
+6. **client_traffic** - Статистика трафика клиентов
+7. **history_of_seeders** - История миграций
+
+### Автоматическая миграция
+
+При первом запуске система автоматически:
+- Создает все необходимые таблицы
+- Добавляет пользователя по умолчанию (admin/admin)
+- Применяет все миграции
+
+## Управление сервисом
+
+### Статус
+```bash
 sudo systemctl status x-ui
+```
 
-# View logs
+### Логи
+```bash
 sudo journalctl -u x-ui -f
 ```
 
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `XUI_DB_TYPE` | Database type (mysql/sqlite) | mysql |
-| `XUI_DB_DSN` | MySQL connection string | xui_user:xui_password@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local |
-| `XUI_LOG_LEVEL` | Log level (debug/info/notice/warn/error) | info |
-| `XUI_DEBUG` | Enable debug mode | false |
-
-### MySQL Configuration
-
-The application automatically creates the MySQL database and tables. The default configuration:
-
-- **Database**: `xui_db`
-- **User**: `xui_user`
-- **Password**: `xui_password`
-- **Host**: `127.0.0.1`
-- **Port**: `3306`
-
-## Usage
-
-### Start x-ui
-```bash
-sudo systemctl start x-ui
-```
-
-### Stop x-ui
-```bash
-sudo systemctl stop x-ui
-```
-
-### Restart x-ui
+### Перезапуск
 ```bash
 sudo systemctl restart x-ui
 ```
 
-### Check Status
+### Остановка
 ```bash
-sudo systemctl status x-ui
+sudo systemctl stop x-ui
 ```
 
-### View Logs
+## Доступ к панели
+
+После установки панель будет доступна по адресу:
+- **URL**: http://your-server-ip:54321
+- **Логин**: admin
+- **Пароль**: admin
+
+## Резервное копирование
+
+### База данных
 ```bash
-sudo journalctl -u x-ui -f
+mysqldump -u root -p 3x-ui > backup_$(date +%Y%m%d_%H%M%S).sql
 ```
 
-### Access Panel
-- **URL**: `http://your-server-ip:54321`
-- **Default Username**: `admin`
-- **Default Password**: `admin`
-
-## Troubleshooting
-
-### MySQL Connection Issues
-
-1. **Check MySQL Status**:
+### Восстановление
 ```bash
-sudo systemctl status mariadb
+mysql -u root -p 3x-ui < backup_file.sql
 ```
 
-2. **Check MySQL Logs**:
+## Устранение неполадок
+
+### Проверка подключения к MySQL
+```bash
+mysql -u root -p -h localhost
+```
+
+### Проверка статуса MySQL
+```bash
+sudo systemctl status mysql
+```
+
+### Просмотр логов MySQL
 ```bash
 sudo tail -f /var/log/mysql/error.log
 ```
 
-3. **Test MySQL Connection**:
+### Проверка портов
 ```bash
-mysql -u xui_user -p xui_db
+sudo netstat -tlnp | grep :3306
 ```
 
-### x-ui Service Issues
+## Обновление
 
-1. **Check Service Status**:
+1. Остановите сервис:
 ```bash
-sudo systemctl status x-ui
-```
-
-2. **View Service Logs**:
-```bash
-sudo journalctl -u x-ui -f
-```
-
-3. **Check Environment Variables**:
-```bash
-sudo systemctl show x-ui --property=Environment
-```
-
-### Database Migration
-
-If you're migrating from SQLite to MySQL:
-
-```bash
-# Stop x-ui
 sudo systemctl stop x-ui
+```
 
-# Export data from SQLite (if needed)
-# Import data to MySQL (if needed)
+2. Создайте резервную копию:
+```bash
+mysqldump -u root -p 3x-ui > backup_before_update.sql
+```
 
-# Start x-ui with MySQL
+3. Обновите код и пересоберите:
+```bash
+git pull
+sudo ./build_linux.sh
+```
+
+4. Запустите сервис:
+```bash
 sudo systemctl start x-ui
 ```
 
-## Security Considerations
+## Безопасность
 
-1. **Change Default Passwords**:
-   - Change the default x-ui admin password
-   - Change the MySQL root password
-   - Change the xui_user password
+### Рекомендации
 
-2. **Firewall Configuration**:
-   - Only allow necessary ports (22, 54321)
-   - Consider using a reverse proxy
+1. Измените пароль по умолчанию после первого входа
+2. Используйте сильные пароли для MySQL
+3. Настройте firewall для ограничения доступа
+4. Регулярно обновляйте систему
+5. Мониторьте логи на предмет подозрительной активности
 
-3. **SSL/TLS**:
-   - Configure SSL certificates for secure access
-   - Use HTTPS instead of HTTP
-
-## Performance Tuning
-
-### MySQL Optimization
-
-Edit `/etc/mysql/conf.d/x-ui.cnf`:
-
-```ini
-[mysqld]
-# Increase buffer pool size for better performance
-innodb_buffer_pool_size = 256M
-
-# Optimize for read-heavy workloads
-innodb_read_io_threads = 8
-innodb_write_io_threads = 8
-
-# Enable query cache
-query_cache_type = 1
-query_cache_size = 64M
-```
-
-### System Optimization
-
+### Настройка firewall
 ```bash
-# Increase file descriptor limits
-echo "* soft nofile 65536" >> /etc/security/limits.conf
-echo "* hard nofile 65536" >> /etc/security/limits.conf
-
-# Optimize kernel parameters
-echo "net.core.somaxconn = 65535" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_max_syn_backlog = 65535" >> /etc/sysctl.conf
-sysctl -p
+sudo ufw allow 54321/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 80/tcp
 ```
 
-## Contributing
+## Поддержка
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+При возникновении проблем:
 
-## License
+1. Проверьте логи: `sudo journalctl -u x-ui -f`
+2. Проверьте статус MySQL: `sudo systemctl status mysql`
+3. Проверьте подключение к БД: `mysql -u root -p -h localhost`
+4. Создайте issue в репозитории с подробным описанием проблемы
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+## Лицензия
 
-## Support
-
-For support and questions:
-
-- Create an issue on GitHub
-- Check the troubleshooting section
-- Review the logs for error messages
-
-## Changelog
-
-### Version 2.6.1-MySQL
-- Added MySQL support
-- Improved database initialization
-- Enhanced error handling
-- Added automatic MySQL setup
-- Updated systemd service configuration
-- Added comprehensive installation scripts 
+MIT License - см. файл LICENSE для подробностей. 

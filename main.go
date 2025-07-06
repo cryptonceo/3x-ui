@@ -22,35 +22,6 @@ import (
 	"github.com/op/go-logging"
 )
 
-// setupMySQL checks and sets up MySQL if needed
-func setupMySQL() error {
-	log.Println("Checking MySQL setup...")
-	
-	// Load environment variables
-	godotenv.Load()
-	
-	// Check if MySQL is configured
-	dbType := config.GetDBType()
-	if dbType != "mysql" {
-		log.Println("MySQL not configured, using default database type")
-		return nil
-	}
-	
-	log.Println("MySQL is configured, checking connection...")
-	
-	// Try to initialize database
-	err := database.InitDB()
-	if err != nil {
-		log.Printf("Database initialization failed: %v", err)
-		log.Println("Please ensure MySQL is properly installed and configured")
-		log.Println("You can run the MySQL setup script: sudo bash install_mysql.sh")
-		return err
-	}
-	
-	log.Println("MySQL connection successful")
-	return nil
-}
-
 func runWebServer() {
 	log.Printf("Starting %v %v", config.GetName(), config.GetVersion())
 
@@ -69,18 +40,17 @@ func runWebServer() {
 		log.Fatalf("Unknown log level: %v", config.GetLogLevel())
 	}
 
-	// Load environment variables
 	godotenv.Load()
 
-	// Setup MySQL if configured
-	if err := setupMySQL(); err != nil {
-		log.Fatalf("MySQL setup failed: %v", err)
+	err := database.InitDB(config.GetDBPath())
+	if err != nil {
+		log.Fatalf("Error initializing database: %v", err)
 	}
 
 	var server *web.Server
 	server = web.NewServer()
 	global.SetWebServer(server)
-	err := server.Start()
+	err = server.Start()
 	if err != nil {
 		log.Fatalf("Error starting web server: %v", err)
 		return
@@ -142,7 +112,7 @@ func runWebServer() {
 }
 
 func resetSetting() {
-	err := database.InitDB()
+	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		fmt.Println("Failed to initialize database:", err)
 		return
@@ -226,7 +196,7 @@ func updateTgbotEnableSts(status bool) {
 }
 
 func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime string) {
-	err := database.InitDB()
+	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		fmt.Println("Error initializing database:", err)
 		return
@@ -263,7 +233,7 @@ func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime stri
 }
 
 func updateSetting(port int, username string, password string, webBasePath string, listenIP string, resetTwoFactor bool) {
-	err := database.InitDB()
+	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		fmt.Println("Database initialization failed:", err)
 		return
@@ -281,21 +251,32 @@ func updateSetting(port int, username string, password string, webBasePath strin
 		}
 	}
 
-	if username != "" {
+	if username != "" || password != "" {
 		err := userService.UpdateFirstUser(username, password)
 		if err != nil {
-			fmt.Println("Failed to update username:", err)
+			fmt.Println("Failed to update username and password:", err)
 		} else {
-			fmt.Printf("Username updated successfully: %v\n", username)
+			fmt.Println("Username and password updated successfully")
 		}
 	}
 
 	if webBasePath != "" {
 		err := settingService.SetBasePath(webBasePath)
 		if err != nil {
-			fmt.Println("Failed to set web base path:", err)
+			fmt.Println("Failed to set base URI path:", err)
 		} else {
-			fmt.Printf("Web base path set successfully: %v\n", webBasePath)
+			fmt.Println("Base URI path set successfully")
+		}
+	}
+
+	if resetTwoFactor {
+		err := settingService.SetTwoFactorEnable(false)
+
+		if err != nil {
+			fmt.Println("Failed to reset two-factor authentication:", err)
+		} else {
+			settingService.SetTwoFactorToken("")
+			fmt.Println("Two-factor authentication reset successfully")
 		}
 	}
 
@@ -310,7 +291,7 @@ func updateSetting(port int, username string, password string, webBasePath strin
 }
 
 func updateCert(publicKey string, privateKey string) {
-	err := database.InitDB()
+	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -370,29 +351,13 @@ func GetListenIP(getListen bool) {
 func migrateDb() {
 	inboundService := service.InboundService{}
 
-	err := database.InitDB()
+	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Start migrating database...")
 	inboundService.MigrateDB()
 	fmt.Println("Migration done!")
-}
-
-// setupMySQLCommand handles MySQL setup from command line
-func setupMySQLCommand() {
-	fmt.Println("Setting up MySQL for x-ui...")
-	fmt.Println("This will install and configure MySQL for x-ui")
-	fmt.Println("Make sure you have root privileges")
-	
-	// Check if running as root
-	if os.Geteuid() != 0 {
-		fmt.Println("Error: This command must be run as root")
-		fmt.Println("Please run: sudo ./x-ui setup-mysql")
-		return
-	}
-	
-	fmt.Println("MySQL setup completed. You can now start x-ui with MySQL support.")
 }
 
 func main() {
@@ -448,7 +413,6 @@ func main() {
 		fmt.Println("    run            run web panel")
 		fmt.Println("    migrate        migrate form other/old x-ui")
 		fmt.Println("    setting        set settings")
-		fmt.Println("    setup-mysql    setup MySQL for x-ui")
 	}
 
 	flag.Parse()
@@ -467,8 +431,6 @@ func main() {
 		runWebServer()
 	case "migrate":
 		migrateDb()
-	case "setup-mysql":
-		setupMySQLCommand()
 	case "setting":
 		err := settingCmd.Parse(os.Args[2:])
 		if err != nil {

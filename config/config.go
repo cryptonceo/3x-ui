@@ -54,6 +54,54 @@ func GetBinFolderPath() string {
 	return binFolderPath
 }
 
+// MySQL конфигурация
+func GetMySQLHost() string {
+	host := os.Getenv("XUI_MYSQL_HOST")
+	if host == "" {
+		host = "localhost"
+	}
+	return host
+}
+
+func GetMySQLPort() int {
+	port := os.Getenv("XUI_MYSQL_PORT")
+	if port == "" {
+		return 3306
+	}
+	// Здесь можно добавить парсинг порта если нужно
+	return 3306
+}
+
+func GetMySQLUser() string {
+	user := os.Getenv("XUI_MYSQL_USER")
+	if user == "" {
+		user = "root"
+	}
+	return user
+}
+
+func GetMySQLPassword() string {
+	password := os.Getenv("XUI_MYSQL_PASSWORD")
+	if password == "" {
+		password = "frif2003"
+	}
+	return password
+}
+
+func GetMySQLDatabase() string {
+	database := os.Getenv("XUI_MYSQL_DATABASE")
+	if database == "" {
+		database = "3x-ui"
+	}
+	return database
+}
+
+func GetMySQLDSN() string {
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		GetMySQLUser(), GetMySQLPassword(), GetMySQLHost(), GetMySQLPort(), GetMySQLDatabase())
+}
+
+// Оставляем для совместимости, но теперь возвращаем путь к логам
 func GetDBFolderPath() string {
 	dbFolderPath := os.Getenv("XUI_DB_FOLDER")
 	if dbFolderPath == "" {
@@ -62,8 +110,9 @@ func GetDBFolderPath() string {
 	return dbFolderPath
 }
 
+// Оставляем для совместимости, но теперь возвращаем путь к логам
 func GetDBPath() string {
-	return fmt.Sprintf("%s/%s.db", GetDBFolderPath(), GetName())
+	return fmt.Sprintf("%s/%s.log", GetDBFolderPath(), GetName())
 }
 
 func GetLogFolder() string {
@@ -72,69 +121,4 @@ func GetLogFolder() string {
 		logFolderPath = "/var/log"
 	}
 	return logFolderPath
-}
-
-func GetDBType() string {
-	dbType := os.Getenv("XUI_DB_TYPE")
-	if dbType == "" {
-		// Default to MySQL for better performance
-		dbType = "mysql"
-	}
-	return dbType
-}
-
-func GetDBDSN() string {
-	dsn := os.Getenv("XUI_DB_DSN")
-	if dsn == "" {
-		// Default MySQL DSN
-		dsn = "root:password@tcp(127.0.0.1:3306)/xui_db?charset=utf8mb4&parseTime=True&loc=Local"
-	}
-	return dsn
-}
-
-// GetMySQLConfig returns MySQL-specific configuration
-func GetMySQLConfig() (string, string, string, string, string) {
-	dsn := GetDBDSN()
-	
-	// Parse DSN to extract components
-	// Format: username:password@tcp(host:port)/database?params
-	parts := strings.Split(dsn, "@")
-	if len(parts) != 2 {
-		return "root", "password", "127.0.0.1", "3306", "xui_db"
-	}
-	
-	userPass := strings.Split(parts[0], ":")
-	hostDB := strings.Split(parts[1], "/")
-	
-	username := "root"
-	password := "password"
-	if len(userPass) == 2 {
-		username = userPass[0]
-		password = userPass[1]
-	}
-	
-	host := "127.0.0.1"
-	port := "3306"
-	database := "xui_db"
-	
-	if len(hostDB) == 2 {
-		// Extract host and port
-		hostPort := strings.TrimPrefix(hostDB[0], "tcp(")
-		hostPort = strings.TrimSuffix(hostPort, ")")
-		hp := strings.Split(hostPort, ":")
-		if len(hp) == 2 {
-			host = hp[0]
-			port = hp[1]
-		} else {
-			host = hostPort
-		}
-		
-		// Extract database name
-		dbParts := strings.Split(hostDB[1], "?")
-		if len(dbParts) > 0 {
-			database = dbParts[0]
-		}
-	}
-	
-	return username, password, host, port, database
 }
