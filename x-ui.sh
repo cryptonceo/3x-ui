@@ -6,6 +6,121 @@ blue='\033[0;34m'
 yellow='\033[0;33m'
 plain='\033[0m'
 
+# Проверяем аргументы командной строки
+if [[ $# -gt 0 ]]; then
+    case "$1" in
+        "start")
+            systemctl start x-ui
+            echo -e "${green}3x-ui запущен${plain}"
+            exit 0
+            ;;
+        "stop")
+            systemctl stop x-ui
+            echo -e "${yellow}3x-ui остановлен${plain}"
+            exit 0
+            ;;
+        "restart")
+            systemctl restart x-ui
+            echo -e "${green}3x-ui перезапущен${plain}"
+            exit 0
+            ;;
+        "status")
+            systemctl status x-ui --no-pager -l
+            exit 0
+            ;;
+        "settings")
+            if [[ -f /usr/local/x-ui/x-ui ]]; then
+                /usr/local/x-ui/x-ui setting -show true
+            else
+                echo -e "${red}3x-ui не установлен${plain}"
+            fi
+            exit 0
+            ;;
+        "enable")
+            systemctl enable x-ui
+            echo -e "${green}Автозапуск 3x-ui включен${plain}"
+            exit 0
+            ;;
+        "disable")
+            systemctl disable x-ui
+            echo -e "${yellow}Автозапуск 3x-ui отключен${plain}"
+            exit 0
+            ;;
+        "log")
+            journalctl -u x-ui -f
+            exit 0
+            ;;
+        "banlog")
+            if [[ -f /var/log/3xipl-banned.log ]]; then
+                tail -f /var/log/3xipl-banned.log
+            else
+                echo -e "${yellow}Лог блокировок не найден${plain}"
+            fi
+            exit 0
+            ;;
+        "update")
+            bash <(curl -Ls https://raw.githubusercontent.com/cryptonceo/3x-ui/main/install.sh)
+            exit 0
+            ;;
+        "legacy")
+            echo -n "Введите версию панели (например 2.4.0): "
+            read -r tag_version
+            if [[ -z "$tag_version" ]]; then
+                echo -e "${red}Версия панели не может быть пустой${plain}"
+                exit 1
+            fi
+            bash <(curl -Ls "https://raw.githubusercontent.com/cryptonceo/3x-ui/v$tag_version/install.sh") "v$tag_version"
+            exit 0
+            ;;
+        "install")
+            bash <(curl -Ls https://raw.githubusercontent.com/cryptonceo/3x-ui/main/install.sh)
+            exit 0
+            ;;
+        "uninstall")
+            echo -e "${red}Вы уверены, что хотите удалить панель? xray также будет удален!${plain}"
+            read -rp "Продолжить? (y/n): " confirm
+            if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+                systemctl stop x-ui
+                systemctl disable x-ui
+                rm /etc/systemd/system/x-ui.service -f
+                systemctl daemon-reload
+                systemctl reset-failed
+                rm /etc/x-ui/ -rf 2>/dev/null || true
+                rm /usr/local/x-ui/ -rf
+                rm /usr/bin/x-ui -f
+                echo -e "${green}Удаление завершено успешно${plain}"
+            else
+                echo -e "${yellow}Удаление отменено${plain}"
+            fi
+            exit 0
+            ;;
+        "help"|"-h"|"--help")
+            echo -e "${blue}Использование команды x-ui:${plain}"
+            echo -e "  ${green}x-ui${plain}              - Показать меню управления"
+            echo -e "  ${green}x-ui start${plain}        - Запустить сервис"
+            echo -e "  ${green}x-ui stop${plain}         - Остановить сервис"
+            echo -e "  ${green}x-ui restart${plain}      - Перезапустить сервис"
+            echo -e "  ${green}x-ui status${plain}       - Показать статус"
+            echo -e "  ${green}x-ui settings${plain}     - Показать настройки"
+            echo -e "  ${green}x-ui enable${plain}       - Включить автозапуск"
+            echo -e "  ${green}x-ui disable${plain}      - Отключить автозапуск"
+            echo -e "  ${green}x-ui log${plain}          - Показать логи"
+            echo -e "  ${green}x-ui banlog${plain}       - Показать логи блокировок"
+            echo -e "  ${green}x-ui update${plain}       - Обновить панель"
+            echo -e "  ${green}x-ui legacy${plain}       - Установить устаревшую версию"
+            echo -e "  ${green}x-ui install${plain}      - Установить панель"
+            echo -e "  ${green}x-ui uninstall${plain}    - Удалить панель"
+            echo -e "  ${green}x-ui help${plain}         - Показать эту справку"
+            exit 0
+            ;;
+        *)
+            echo -e "${red}Неизвестная команда: $1${plain}"
+            echo -e "Используйте ${green}x-ui help${plain} для получения справки"
+            exit 1
+            ;;
+    esac
+fi
+
 #Add some basic function here
 function LOGD() {
     echo -e "${yellow}[DEG] $* ${plain}"
