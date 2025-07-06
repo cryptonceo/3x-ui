@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"fmt"
 
 	"x-ui/config"
 	"x-ui/logger"
@@ -304,14 +303,9 @@ func (s *Server) Start() (err error) {
 		}
 	}()
 
-	timeZone, err := s.settingService.GetTimeLocation()
+	loc, err := s.settingService.GetTimeLocation()
 	if err != nil {
 		return err
-	}
-
-	loc, err := time.LoadLocation(timeZone)
-	if err != nil {
-		return fmt.Errorf("invalid time location: %v", err)
 	}
 	s.cron = cron.New(cron.WithLocation(loc), cron.WithSeconds())
 	s.cron.Start()

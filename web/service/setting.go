@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"x-ui/database"
 	"x-ui/database/model"
@@ -87,7 +88,7 @@ func (s *SettingService) GetDefaultJsonConfig() (any, error) {
 func (s *SettingService) GetAllSetting() (*entity.AllSetting, error) {
 	db := database.GetDB()
 	settings := make([]*model.Setting, 0)
-	err := db.Model(model.Setting{}).Not("setting_key = ?", "xrayTemplateConfig").Find(&settings).Error
+	err := db.Model(model.Setting{}).Not("key = ?", "xrayTemplateConfig").Find(&settings).Error
 	if err != nil {
 		return nil, err
 	}
@@ -139,11 +140,11 @@ func (s *SettingService) GetAllSetting() (*entity.AllSetting, error) {
 
 	keyMap := map[string]bool{}
 	for _, setting := range settings {
-		err := setSetting(setting.SettingKey, setting.Value)
+		err := setSetting(setting.Key, setting.Value)
 		if err != nil {
 			return nil, err
 		}
-		keyMap[setting.SettingKey] = true
+		keyMap[setting.Key] = true
 	}
 
 	for key, value := range defaultValueMap {
@@ -172,7 +173,7 @@ func (s *SettingService) ResetSettings() error {
 func (s *SettingService) getSetting(key string) (*model.Setting, error) {
 	db := database.GetDB()
 	setting := &model.Setting{}
-	err := db.Model(model.Setting{}).Where("setting_key = ?", key).First(setting).Error
+	err := db.Model(model.Setting{}).Where("key = ?", key).First(setting).Error
 	if err != nil {
 		return nil, err
 	}
@@ -184,13 +185,13 @@ func (s *SettingService) saveSetting(key string, value string) error {
 	db := database.GetDB()
 	if database.IsNotFound(err) {
 		return db.Create(&model.Setting{
-			SettingKey: key,
-			Value:      value,
+			Key:   key,
+			Value: value,
 		}).Error
 	} else if err != nil {
 		return err
 	}
-	setting.SettingKey = key
+	setting.Key = key
 	setting.Value = value
 	return db.Save(setting).Error
 }
@@ -408,13 +409,18 @@ func (s *SettingService) GetBasePath() (string, error) {
 	return basePath, nil
 }
 
-func (s *SettingService) GetTimeLocation() (string, error) {
-	var setting model.Setting
-	err := database.GetDB().Where(&model.Setting{SettingKey: "timeLocation"}).First(&setting).Error
+func (s *SettingService) GetTimeLocation() (*time.Location, error) {
+	l, err := s.getString("timeLocation")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return setting.Value, nil
+	location, err := time.LoadLocation(l)
+	if err != nil {
+		defaultLocation := defaultValueMap["timeLocation"]
+		logger.Errorf("location <%v> not exist, using default location: %v", l, defaultLocation)
+		return time.LoadLocation(defaultLocation)
+	}
+	return location, nil
 }
 
 func (s *SettingService) GetSubEnable() (bool, error) {

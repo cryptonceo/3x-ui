@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"x-ui/config"
-	"x-ui/database"
 	"x-ui/logger"
 	"x-ui/util/common"
 	"x-ui/util/sys"
@@ -467,135 +466,28 @@ func (s *ServerService) GetConfigJson() (any, error) {
 }
 
 func (s *ServerService) GetDb() ([]byte, error) {
-	// Update by manually trigger a checkpoint operation
-	err := database.Checkpoint()
-	if err != nil {
-		return nil, err
+	// Для MySQL возвращаем информацию о подключении к базе данных
+	dbInfo := map[string]interface{}{
+		"database_type": "MySQL",
+		"host":          config.GetMySQLHost(),
+		"port":          config.GetMySQLPort(),
+		"database":      config.GetMySQLDatabase(),
+		"user":          config.GetMySQLUser(),
+		"message":       "Use mysqldump for database backup/restore",
 	}
-	// Open the file for reading
-	file, err := os.Open(config.GetDBPath())
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
 
-	// Read the file contents
-	fileContents, err := io.ReadAll(file)
+	jsonData, err := json.Marshal(dbInfo)
 	if err != nil {
 		return nil, err
 	}
 
-	return fileContents, nil
+	return jsonData, nil
 }
 
 func (s *ServerService) ImportDB(file multipart.File) error {
-	// Check if the file is a SQLite database
-	isValidDb, err := database.IsSQLiteDB(file)
-	if err != nil {
-		return common.NewErrorf("Error checking db file format: %v", err)
-	}
-	if !isValidDb {
-		return common.NewError("Invalid db file format")
-	}
-
-	// Reset the file reader to the beginning
-	_, err = file.Seek(0, 0)
-	if err != nil {
-		return common.NewErrorf("Error resetting file reader: %v", err)
-	}
-
-	// Save the file as a temporary file
-	tempPath := fmt.Sprintf("%s.temp", config.GetDBPath())
-
-	// Remove the existing temporary file (if any)
-	if _, err := os.Stat(tempPath); err == nil {
-		if errRemove := os.Remove(tempPath); errRemove != nil {
-			return common.NewErrorf("Error removing existing temporary db file: %v", errRemove)
-		}
-	}
-
-	// Create the temporary file
-	tempFile, err := os.Create(tempPath)
-	if err != nil {
-		return common.NewErrorf("Error creating temporary db file: %v", err)
-	}
-
-	// Robust deferred cleanup for the temporary file
-	defer func() {
-		if tempFile != nil {
-			if cerr := tempFile.Close(); cerr != nil {
-				logger.Warningf("Warning: failed to close temp file: %v", cerr)
-			}
-		}
-		if _, err := os.Stat(tempPath); err == nil {
-			if rerr := os.Remove(tempPath); rerr != nil {
-				logger.Warningf("Warning: failed to remove temp file: %v", rerr)
-			}
-		}
-	}()
-
-	// Save uploaded file to temporary file
-	if _, err = io.Copy(tempFile, file); err != nil {
-		return common.NewErrorf("Error saving db: %v", err)
-	}
-
-	// Check if we can init the db or not
-	if err = database.InitDB(); err != nil {
-		return common.NewErrorf("Error checking db: %v", err)
-	}
-
-	// Stop Xray
-	s.StopXrayService()
-
-	// Backup the current database for fallback
-	fallbackPath := fmt.Sprintf("%s.backup", config.GetDBPath())
-
-	// Remove the existing fallback file (if any)
-	if _, err := os.Stat(fallbackPath); err == nil {
-		if errRemove := os.Remove(fallbackPath); errRemove != nil {
-			return common.NewErrorf("Error removing existing fallback db file: %v", errRemove)
-		}
-	}
-
-	// Move the current database to the fallback location
-	if err = os.Rename(config.GetDBPath(), fallbackPath); err != nil {
-		return common.NewErrorf("Error backing up current db file: %v", err)
-	}
-
-	// Defer fallback cleanup ONLY if everything goes well
-	defer func() {
-		if _, err := os.Stat(fallbackPath); err == nil {
-			if rerr := os.Remove(fallbackPath); rerr != nil {
-				logger.Warningf("Warning: failed to remove fallback file: %v", rerr)
-			}
-		}
-	}()
-
-	// Move temp to DB path
-	if err = os.Rename(tempPath, config.GetDBPath()); err != nil {
-		// Restore from fallback
-		if errRename := os.Rename(fallbackPath, config.GetDBPath()); errRename != nil {
-			return common.NewErrorf("Error moving db file and restoring fallback: %v", errRename)
-		}
-		return common.NewErrorf("Error moving db file: %v", err)
-	}
-
-	// Migrate DB
-	if err = database.InitDB(); err != nil {
-		if errRename := os.Rename(fallbackPath, config.GetDBPath()); errRename != nil {
-			return common.NewErrorf("Error migrating db and restoring fallback: %v", errRename)
-		}
-		return common.NewErrorf("Error migrating db: %v", err)
-	}
-
-	s.inboundService.MigrateDB()
-
-	// Start Xray
-	if err = s.RestartXrayService(); err != nil {
-		return common.NewErrorf("Imported DB but failed to start Xray: %v", err)
-	}
-
-	return nil
+	// Для MySQL импорт базы данных не поддерживается через файл
+	// Вместо этого нужно использовать mysqldump для экспорта/импорта
+	return common.NewError("Import DB is not supported for MySQL. Use mysqldump for database backup/restore.")
 }
 
 func (s *ServerService) UpdateGeofile(fileName string) error {
